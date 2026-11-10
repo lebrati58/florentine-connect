@@ -1,0 +1,162 @@
+// Banc d'essai RLS : exécute la migration réelle sur un Postgres local (PGlite)
+// avec des stubs minimaux des schémas auth/storage de Supabase.
+import { PGlite } from '@electric-sql/pglite';
+import { readFileSync } from 'node:fs';
+
+const migration = readFileSync(process.argv[2], 'utf8');
+const rollback = process.argv[3] ? readFileSync(process.argv[3], 'utf8') : null;
+const db = new PGlite();
+let pass = 0, fail = 0;
+const ok = (cond, msg) => { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } };
+
+await db.exec(`
+  create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
+  grant usage on schema public to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+  alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+  alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
+  create schema auth; grant usage on schema auth to anon, authenticated, service_role;
+  create table auth.users (id uuid primary key, email text);
+  create table auth.sessions (id uuid primary key default gen_random_uuid(), user_id uuid);
+  create function auth.uid() returns uuid language sql stable as $$
+    select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+  create schema storage; grant usage on schema storage to anon, authenticated;
+  create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
+  create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text, name text);
+  alter table storage.objects enable row level security;
+  grant all on storage.objects to authenticated;
+  create publication supabase_realtime;
+`);
+
+await db.exec(migration);
+await db.exec(migration); // idempotence
+console.log('Migration appliquée deux fois sans erreur');
+
+const U = {
+  owner: '00000000-0000-0000-0000-000000000001', tech: '00000000-0000-0000-0000-000000000002',
+  viewer: '00000000-0000-0000-0000-000000000003', A: '00000000-0000-0000-0000-00000000000a',
+  B: '00000000-0000-0000-0000-00000000000b', C: '00000000-0000-0000-0000-00000000000c',
+  X: '00000000-0000-0000-0000-0000000000ff',
+};
+for (const id of Object.values(U)) await db.query('insert into auth.users(id) values ($1)', [id]);
+
+async function as(who, sql, params = []) {
+  await db.exec('reset role');
+  if (who === 'anon') {
+    await db.exec(`set role anon; select set_config('request.jwt.claim.sub','',false)`);
+  } else {
+    await db.query(`select set_config('request.jwt.claim.sub', $1, false)`, [U[who]]);
+    await db.exec('set role authenticated');
+  }
+  try { return { rows: (await db.query(sql, params)).rows }; }
+  catch (e) { return { error: e.message }; }
+  finally { await db.exec('reset role'); }
+}
+
+console.log('\n— Démarrage & équipe');
+ok((await as('anon', 'select public.staff_bootstrap_open() o')).rows[0].o === true, 'bootstrap ouvert au départ');
+ok(!(await as('owner', `select public.claim_first_owner('Lionel')`)).error, 'premier compte devient propriétaire');
+ok(/bootstrap_closed/.test((await as('X', `select public.claim_first_owner('Intrus')`)).error), 'second bootstrap refusé');
+ok(!(await as('owner', `insert into public.staff(user_id,full_name,role) values ($1,'Danny','technician')`, [U.tech])).error, 'propriétaire ajoute un technicien');
+ok(!(await as('owner', `insert into public.staff(user_id,full_name,role) values ($1,'Observateur','viewer')`, [U.viewer])).error, 'propriétaire ajoute un observateur');
+ok(!!(await as('tech', `insert into public.staff(user_id,full_name,role) values ($1,'X','owner')`, [U.X])).error, 'technicien ne peut pas créer de compte équipe');
+
+console.log('\n— Appartements');
+ok(!(await as('owner', `insert into public.apartments(tower_id,number,floor) values (1,'12',3),(2,'30',7),(1,'14',3)`)).error, 'propriétaire crée des appartements');
+ok(!!(await as('tech', `insert into public.apartments(tower_id,number) values (3,'1')`)).error, 'technicien ne crée pas d’appartement');
+await db.exec(`update public.apartments set user_id='${U.A}' where tower_id=1 and number='12';
+               update public.apartments set user_id='${U.B}' where tower_id=2 and number='30';
+               update public.apartments set user_id='${U.C}' where tower_id=1 and number='14';`);
+ok((await as('A', 'select * from public.apartments')).rows.length === 1, 'résident ne voit que son appartement');
+ok(!!(await as('A', `update public.apartments set user_id=$1`, [U.B])).error, 'résident ne peut pas réassigner un compte');
+ok((await as('X', 'select * from public.apartments')).rows.length === 0, 'compte non membre : aucun appartement');
+
+console.log('\n— Tickets');
+const ins = await as('A', `insert into public.tickets(tower_id,location,category,title,description,status,priority,assignee_id)
+  values (4,'apartment','plumbing','Fuite sous l''évier','Goutte à goutte','closed','urgent',$1) returning *`, [U.tech]);
+ok(!ins.error, 'résident crée un ticket ' + (ins.error || ''));
+const t = ins.rows?.[0] || {};
+ok(t.status === 'new' && t.assignee_id === null, 'statut/responsable imposés côté serveur');
+ok(t.tower_id === 1 && t.floor === 3, 'tour et étage forcés depuis l’appartement');
+ok(t.ref === 'FL-' + String(t.id).padStart(5, '0'), 'référence générée ' + t.ref);
+ok((await as('B', 'select * from public.tickets')).rows.length === 0, 'autre appartement : ticket invisible');
+ok((await as('X', 'select * from public.tickets')).rows.length === 0, 'non-membre : ticket invisible');
+ok(!!(await as('anon', 'select * from public.tickets')).error, 'anonyme : accès refusé');
+ok(!!(await as('X', `insert into public.tickets(tower_id,category,title) values (1,'other','Spam spam')`)).error, 'non-membre ne peut pas créer de ticket');
+{ const r = await as('A', `update public.tickets set status='resolved' where id=$1 returning id`, [t.id]); ok(!!r.error || r.rows.length === 0, 'résident ne modifie pas le statut (aucune ligne affectée)'); }
+ok((await as('tech', 'select * from public.tickets')).rows.length === 1, 'gestionnaire voit le ticket');
+ok(!(await as('tech', `update public.tickets set status='in_progress', assignee_id=$2, priority='high' where id=$1`, [t.id, U.tech])).error, 'gestionnaire change le statut / assigne');
+ok(!!((await as('viewer', `update public.tickets set status='closed' where id=$1 returning id`, [t.id])).rows?.length === 0), 'observateur : modification sans effet');
+const evA = (await as('A', 'select kind from public.ticket_events where ticket_id=$1 order by id', [t.id])).rows.map(r => r.kind);
+const evS = (await as('tech', 'select kind from public.ticket_events where ticket_id=$1 order by id', [t.id])).rows.map(r => r.kind);
+ok(evA.join() === 'created,status', 'résident voit création + statut : ' + evA.join());
+ok(evS.includes('assignee') && evS.includes('priority'), 'équipe voit tout l’historique : ' + evS.join());
+ok(!(await as('A', `insert into public.ticket_events(ticket_id,kind,body) values ($1,'comment','Merci !')`, [t.id])).error, 'résident commente');
+ok(!!(await as('A', `insert into public.ticket_events(ticket_id,kind,body,is_public) values ($1,'note','x',false)`, [t.id])).error, 'résident ne crée pas de note interne');
+ok(!!(await as('B', `insert into public.ticket_events(ticket_id,kind,body) values ($1,'comment','Hack')`, [t.id])).error, 'autre résident ne commente pas');
+ok(!(await as('tech', `insert into public.ticket_events(ticket_id,kind,body) values ($1,'note','Pièce commandée')`, [t.id])).error, 'équipe ajoute une note interne');
+ok(!(await as('A', `select 1 from public.ticket_events where kind='note'`)).rows.length, 'note interne invisible pour le résident');
+ok(/cannot_cancel/.test((await as('A', 'select public.resident_cancel_ticket($1)', [t.id])).error || ''), 'annulation impossible une fois pris en charge');
+const t2 = (await as('A', `insert into public.tickets(tower_id,location,category,title) values (3,'common','elevator','Ascenseur bloqué') returning *`)).rows[0];
+ok(t2.tower_id === 3 && t2.apartment_id !== null, 'parties communes : tour choisie, déclarant suivi');
+ok(!(await as('A', 'select public.resident_cancel_ticket($1)', [t2.id])).error, 'résident annule un ticket encore nouveau');
+await as('tech', `update public.tickets set status='resolved' where id=$1`, [t.id]);
+ok((await as('A', 'select resolved_at from public.tickets where id=$1', [t.id])).rows[0].resolved_at, 'date de résolution horodatée');
+
+console.log('\n— Photos (stockage privé)');
+ok(!(await as('A', `insert into storage.objects(bucket_id,name) values ('ticket-photos',$1)`, [`${t.id}/a.jpg`])).error, 'résident dépose une photo sur son ticket');
+ok(!!(await as('B', `insert into storage.objects(bucket_id,name) values ('ticket-photos',$1)`, [`${t.id}/b.jpg`])).error, 'autre résident ne peut pas déposer');
+ok(!!(await as('A', `insert into storage.objects(bucket_id,name) values ('ticket-photos','../etc/x.jpg')`)).error, 'chemin invalide refusé');
+ok((await as('B', `select * from storage.objects`)).rows.length === 0, 'photo invisible pour un autre résident');
+ok(!(await as('A', `insert into public.ticket_photos(ticket_id,path) values ($1,$2)`, [t.id, `${t.id}/a.jpg`])).error, 'photo rattachée au ticket');
+
+console.log('\n— Annonces');
+await as('owner', `insert into public.announcements(title,body,tower_id) values ('Coupure d''eau','Mardi 9h-12h',2)`);
+await as('owner', `insert into public.announcements(title,body,published) values ('Brouillon','Non publié',false)`);
+ok((await as('A', 'select * from public.announcements')).rows.length === 0, 'annonce tour 2 / brouillon invisibles pour la tour 1');
+ok((await as('B', 'select * from public.announcements')).rows.length === 1, 'annonce visible pour la tour 2');
+ok(!!(await as('A', `insert into public.announcements(title,body) values ('Pub','spam')`)).error, 'résident ne publie pas d’annonce');
+
+console.log('\n— Annuaire collaboratif');
+ok((await as('A', 'select * from public.directory_entries')).rows.length === 17, 'ancien annuaire importé (17 fiches, sans numéro)');
+ok((await as('X', 'select * from public.directory_entries')).rows.length === 0, 'non-membre : annuaire invisible');
+ok(/directory_phone_consent/.test((await as('A', `insert into public.directory_entries(trade,name,phone) values ('locksmith','Avi Serrurier','050-1234567')`)).error || ''), 'numéro refusé sans accord de publication');
+const e = (await as('A', `insert into public.directory_entries(trade,name,phone,phone_public_ok) values ('locksmith','Avi Serrurier','050-1234567',true) returning *`)).rows[0];
+ok(e && e.version === 1 && e.source === 'resident', 'résident ajoute un professionnel');
+ok(!(await as('B', `update public.directory_entries set phone='050-7654321' where id=$1`, [e.id])).error, 'voisin corrige la fiche');
+ok((await as('B', 'select version from public.directory_entries where id=$1', [e.id])).rows[0].version === 2, 'version incrémentée');
+ok(!(await as('B', 'select public.restore_directory_version($1,1)', [e.id])).error, 'restauration de la version 1');
+const revs = (await as('A', 'select version, change_kind, snapshot->>$2 phone from public.directory_revisions where entry_id=$1 order by version', [e.id, 'phone'])).rows;
+ok(revs.map(r => r.change_kind).join() === 'create,edit,restore' && revs[2].phone === '050-1234567', 'historique complet : ' + revs.map(r => r.change_kind).join());
+ok(!!(await as('A', `update public.directory_entries set status='hidden' where id=$1`, [e.id])).error, 'résident ne peut pas masquer une fiche');
+ok(!(await as('A', `insert into public.directory_recommendations(entry_id,rating,comment) values ($1,5,'Rapide et sérieux')`, [e.id])).error, 'recommandation ajoutée');
+ok(!!(await as('A', `insert into public.directory_recommendations(entry_id,rating) values ($1,1)`, [e.id])).error, 'une seule recommandation par appartement');
+for (const w of ['A', 'B', 'C']) await as(w, `insert into public.directory_reports(entry_id,reason) values ($1,'obsolete')`, [e.id]);
+ok((await as('A', 'select status from public.directory_entries where id=$1', [e.id])).rows[0].status === 'obsolete', '3 signalements → fiche obsolète');
+const ov = (await as('B', 'select avg_rating, reco_count from public.directory_overview where id=$1', [e.id])).rows[0];
+ok(Number(ov.avg_rating) === 5 && Number(ov.reco_count) === 1, 'vue agrégée des recommandations');
+ok(!(await as('tech', `update public.directory_entries set status='hidden' where id=$1`, [e.id])).error, 'équipe masque une fiche abusive');
+ok((await as('A', 'select * from public.directory_entries where id=$1', [e.id])).rows.length === 0, 'fiche masquée invisible pour les résidents');
+let limited = false;
+const e2 = (await as('C', `insert into public.directory_entries(trade,name) values ('painting','Peintre test') returning id`)).rows[0];
+for (let i = 0; i < 35 && !limited; i++) {
+  const r = await as('C', `update public.directory_entries set notes=$2 where id=$1`, [e2.id, 'n' + i]);
+  if (r.error && /rate_limited/.test(r.error)) limited = true;
+}
+ok(limited, 'anti-abus : plafond de modifications sur 24 h');
+
+console.log('\n— Révocation de session (fonction serveur uniquement)');
+ok(!!(await as('A', 'select public.revoke_user_sessions($1)', [U.A])).error, 'résident ne peut pas appeler la révocation');
+
+if (rollback) {
+  await db.exec(`reset role; select set_config('request.jwt.claim.sub','',false)`);
+  await db.exec(rollback);
+  const left = (await db.query(`select count(*)::int n from information_schema.tables where table_schema='public'
+     and table_name in ('tickets','apartments','directory_entries','staff','towers')`)).rows[0].n;
+  ok(left === 0, 'retour arrière : objets v2 supprimés');
+  await db.exec(migration);
+  ok(true, 'migration ré-appliquable après retour arrière');
+}
+
+console.log(`\n${pass} réussis, ${fail} échoués`);
+process.exit(fail ? 1 : 0);

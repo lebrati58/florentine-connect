@@ -1,0 +1,9 @@
+{
+  "name": "florentine-connect-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "rls": "node rls-test.mjs ../supabase/migrations/20261110120000_platform_v2.sql ../supabase/rollback/20261110120000_platform_v2_down.sql"
+  },
+  "devDependencies": { "@electric-sql/pglite": "^0.3.0" }
+}

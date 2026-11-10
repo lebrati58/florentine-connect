@@ -1,0 +1,193 @@
+"""Parcours E2E 4FLORENTINE (Playwright + Chrome) contre le backend simulé tests/fake-api.js.
+Usage : python3 tests/e2e.py http://localhost:8811/ <dossier-captures>
+Les règles d'accès réelles (RLS) sont testées séparément contre PostgreSQL (tests/rls-test.mjs).
+"""
+import sys, asyncio, json, pathlib
+from playwright.async_api import async_playwright, expect
+
+BASE = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:8811/'
+OUT = pathlib.Path(sys.argv[2] if len(sys.argv) > 2 else 'shots'); OUT.mkdir(exist_ok=True)
+FAKE = (pathlib.Path(__file__).parent / 'fake-api.js').read_text()
+HEBCAL = {'items': [
+    {'category': 'candles', 'date': '2026-11-13T16:23:00+02:00'},
+    {'category': 'parashat', 'date': '2026-11-14', 'title': 'Parashat Chayei Sara', 'hebrew': 'פרשת חיי שרה'},
+    {'category': 'havdalah', 'date': '2026-11-14T17:21:00+02:00'}]}
+results = []
+
+def check(name, ok, detail=''):
+    results.append((name, bool(ok), detail))
+    print(('  ✓ ' if ok else '  ✗ ') + name + (f' — {detail}' if detail and not ok else ''))
+
+async def new_ctx(b, w, h, lang='fr', mobile=False):
+    ctx = await b.new_context(viewport={'width': w, 'height': h}, device_scale_factor=2 if mobile else 1, is_mobile=mobile, has_touch=mobile)
+    await ctx.add_init_script(f"if(!localStorage.getItem('fl-lang'))localStorage.setItem('fl-lang','{lang}');" + FAKE)
+    await ctx.route('**hebcal.com**', lambda r: r.fulfill(json=HEBCAL))
+    return ctx
+
+async def resident_login(pg, tower, apt, pin):
+    await pg.goto(BASE + 'app/index.html')
+    await pg.wait_for_selector('#loginForm')
+    await pg.click(f'[data-tower="{tower}"]')
+    await pg.fill('#aptInput', apt); await pg.fill('#pinInput', pin)
+    await pg.click('#loginForm [type=submit]')
+
+async def main():
+    async with async_playwright() as p:
+        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
+        ctx = await new_ctx(b, 390, 844, 'fr', mobile=True)
+        pg = await ctx.new_page()
+        errors = []
+        pg.on('pageerror', lambda e: errors.append(str(e)))
+
+        print('1. Le résident ouvre l’application')
+        await pg.goto(BASE + 'app/index.html'); await pg.wait_for_selector('#loginForm')
+        check('écran de connexion affiché', await pg.is_visible('.login h1'))
+        await pg.screenshot(path=str(OUT / 'after-resident-login-mobile.png'))
+
+        print('2. Il se connecte (et un mauvais code est refusé)')
+        await resident_login(pg, 1, '12', '000000')
+        await pg.wait_for_selector('.form-error')
+        check('mauvais code refusé avec message clair', 'incorrect' in (await pg.text_content('.form-error')))
+        await resident_login(pg, 1, '12', '482913')
+        await pg.wait_for_selector('.hero')
+        check('accueil personnalisé (tour + appartement)', 'Appt 12' in await pg.text_content('.hero'))
+        check('horaires de Shabbat intégrés', '16:23' in await pg.text_content('.shabbat'))
+        await pg.screenshot(path=str(OUT / 'after-resident-home-mobile.png'))
+
+        print('3. Il signale un incident avec photo')
+        await pg.click('.cta-report button'); await pg.wait_for_selector('#newForm')
+        await pg.click('#newForm [type=submit]')
+        check('validation : catégorie obligatoire', await pg.is_visible('text=Choisissez une catégorie'))
+        await pg.click('[data-cat="plumbing"]')
+        await pg.fill('#fTitle', 'Fuite sous l’évier de la cuisine')
+        await pg.fill('#fDesc', 'Goutte à goutte depuis hier soir.')
+        await pg.check('input[name=urgent]')
+        await pg.set_input_files('#fPhotos', str(pathlib.Path(__file__).parent.parent / 'assets/brand/icon-192.png'))
+        await pg.wait_for_selector('.thumb img')
+        check('aperçu de la photo', await pg.locator('.thumb img').count() == 1)
+        await pg.screenshot(path=str(OUT / 'after-resident-report-mobile.png'), full_page=True)
+        await pg.click('#newForm [type=submit]')
+        await pg.wait_for_selector('.sent')
+        ref = (await pg.text_content('.sent p'))
+        check('demande envoyée avec référence', 'FL-' in ref, ref)
+        await pg.screenshot(path=str(OUT / 'after-resident-sent-mobile.png'))
+
+        print('4–5. Le gestionnaire voit le ticket et change son statut')
+        actx = await new_ctx(b, 1440, 900, 'he')
+        # Partage du stockage simulé entre les deux applications (même navigateur)
+        dbjson = await pg.evaluate("localStorage.getItem('fl-fake-db')")
+        await actx.add_init_script(f"localStorage.setItem('fl-fake-db', {json.dumps(dbjson)});")
+        apg = await actx.new_page(); apg.on('pageerror', lambda e: errors.append('CRM: ' + str(e)))
+        await apg.goto(BASE + 'admin/index.html'); await apg.wait_for_selector('#staffLogin')
+        check('CRM : connexion équipe requise', await apg.is_visible('#staffLogin'))
+        await apg.screenshot(path=str(OUT / 'after-crm-login-desktop.png'))
+        await apg.fill('#sEmail', 'danny@test.local'); await apg.fill('#sPass', 'manager-pass')
+        await apg.click('#staffLogin [type=submit]'); await apg.wait_for_selector('.kpis')
+        check('CRM : tableau de bord en hébreu RTL', await apg.evaluate("document.documentElement.dir") == 'rtl')
+        kpi = await apg.text_content('.kpi.hot .k-val')
+        check('CRM : KPI urgences = 1 (données réelles)', kpi.strip() == '1', kpi)
+        await apg.screenshot(path=str(OUT / 'after-crm-dashboard-desktop.png'))
+        await apg.goto(BASE + 'admin/index.html#tickets'); await apg.wait_for_selector('.tbl')
+        check('CRM : le ticket du résident apparaît', await apg.locator('tr.clickable', has_text='Fuite').count() == 1)
+        await apg.click('tr.clickable >> text=Fuite'); await apg.wait_for_selector('#dStatus'); await apg.wait_for_timeout(500)
+        await apg.screenshot(path=str(OUT / 'after-crm-ticket-drawer-desktop.png'))
+        await apg.select_option('#dAss', label='Danny'); await apg.wait_for_timeout(400)
+        await apg.select_option('#dStatus', 'in_progress'); await apg.wait_for_timeout(400)
+        await apg.fill('#noteForm textarea', 'Le plombier passe demain matin.')
+        await apg.click('#noteForm [type=submit]'); await apg.wait_for_timeout(400)
+        hist = await apg.text_content('.timeline')
+        check('CRM : historique (création, assignation, statut, message)', all(x in hist for x in ['הפנייה נפתחה', 'אחראי', 'סטטוס', 'הודעה לדייר']), hist[:200])
+        await apg.click('[data-act="close-drawer"]')
+        await apg.click('[data-act="view"][data-v="kanban"]'); await apg.wait_for_selector('.kanban')
+        await apg.screenshot(path=str(OUT / 'after-crm-kanban-desktop.png'))
+
+        print('6. Le résident consulte l’avancement')
+        dbjson = await apg.evaluate("localStorage.getItem('fl-fake-db')")
+        await pg.evaluate(f"localStorage.setItem('fl-fake-db', {json.dumps(dbjson)})")
+        await pg.goto(BASE + 'app/index.html#/requests'); await pg.wait_for_selector('.req')
+        await pg.click('.req'); await pg.wait_for_selector('.tracker')
+        on = await pg.locator('.tracker .stp.on').count()
+        check('progression : 3 étapes atteintes (reçue, prise en charge, en cours)', on == 3, str(on))
+        tl = await pg.text_content('.timeline')
+        check('message du gestionnaire visible, note interne invisible', 'plombier' in tl and 'assignee' not in tl)
+        await pg.screenshot(path=str(OUT / 'after-resident-tracking-mobile.png'), full_page=True)
+
+        print('7–8. Annuaire collaboratif + historisation')
+        await pg.goto(BASE + 'app/index.html#/directory'); await pg.wait_for_selector('.pro')
+        await pg.click('[data-act="entry-form"]'); await pg.wait_for_selector('#entryForm')
+        await pg.select_option('#eTrade', 'locksmith'); await pg.fill('#eName', 'Avi Serrurier')
+        await pg.fill('#ePhone', '050-1234567'); await pg.click('#entryForm [type=submit]')
+        check('numéro refusé sans accord de partage', 'accord' in (await pg.text_content('#entryErr')))
+        await pg.check('#entryForm input[name=consent]'); await pg.click('#entryForm [type=submit]')
+        await pg.wait_for_selector('.pro >> text=Avi Serrurier')
+        check('professionnel ajouté', True)
+        await pg.click('.p-main >> text=Avi Serrurier'); await pg.wait_for_selector('[data-act="entry-form"][data-id]')
+        await pg.click('[data-act="entry-form"][data-id]'); await pg.wait_for_selector('#entryForm')
+        await pg.fill('#ePhone', '050-7654321'); await pg.click('#entryForm [type=submit]')
+        await pg.wait_for_timeout(300)
+        await pg.click('.p-main >> text=Avi Serrurier'); await pg.wait_for_selector('.rev')
+        revs = await pg.locator('.rev').count()
+        check('historique : 2 versions', revs == 2, str(revs))
+        await pg.click('[data-act="restore"]'); await pg.wait_for_timeout(400)
+        await pg.wait_for_selector('.rev')
+        check('restauration → version 3', await pg.locator('.rev').count() == 3)
+        await pg.click('[data-act="recommend"]'); await pg.click('[data-r="5"]'); await pg.fill('#rc', 'Rapide et sérieux')
+        await pg.click('#recoForm [type=submit]'); await pg.wait_for_timeout(400)
+        check('recommandation publiée', 'Rapide et sérieux' in await pg.text_content('.sheet'))
+        await pg.screenshot(path=str(OUT / 'after-resident-directory-entry-mobile.png'), full_page=False)
+        await pg.click('[data-act="close-sheet"]')
+        await pg.screenshot(path=str(OUT / 'after-resident-directory-mobile.png'))
+
+        print('Langues, RTL et tailles d’écran')
+        for lang, word, d in [('he', 'בניין', 'rtl'), ('en', 'Tower', 'ltr')]:
+            await pg.evaluate(f"localStorage.setItem('fl-lang','{lang}')")
+            await pg.goto(BASE + 'app/index.html#/home'); await pg.reload(); await pg.wait_for_selector('.hero')
+            check(f'langue {lang} : direction {d}', await pg.evaluate('document.documentElement.dir') == d and word in await pg.text_content('.hero'))
+            await pg.screenshot(path=str(OUT / f'after-resident-home-{lang}-mobile.png'))
+        await pg.evaluate("localStorage.setItem('fl-lang','fr')")
+        for w, h, name in [(768, 1024, 'tablet'), (1366, 860, 'desktop')]:
+            await pg.set_viewport_size({'width': w, 'height': h})
+            await pg.goto(BASE + 'app/index.html#/home'); await pg.wait_for_selector('.hero')
+            sw = await pg.evaluate('document.documentElement.scrollWidth')
+            check(f'résident {name} : pas de défilement horizontal', sw <= w, f'{sw}>{w}')
+            await pg.screenshot(path=str(OUT / f'after-resident-home-{name}.png'))
+        for w, h, name in [(390, 844, 'mobile'), (820, 1180, 'tablet')]:
+            await apg.set_viewport_size({'width': w, 'height': h})
+            await apg.goto(BASE + 'admin/index.html#dashboard'); await apg.wait_for_selector('.kpis')
+            sw = await apg.evaluate('document.documentElement.scrollWidth')
+            check(f'CRM {name} : pas de défilement horizontal', sw <= w, f'{sw}>{w}')
+            await apg.screenshot(path=str(OUT / f'after-crm-dashboard-{name}.png'))
+        await apg.set_viewport_size({'width': 1440, 'height': 900})
+        for page in ['buildings', 'vendors', 'announcements', 'directory', 'team']:
+            await apg.goto(BASE + f'admin/index.html#{page}'); await apg.wait_for_selector('.page-title')
+            await apg.screenshot(path=str(OUT / f'after-crm-{page}-desktop.png'))
+        check('CRM : toutes les pages s’affichent', True)
+
+        print('Recherche globale + erreurs réseau')
+        await apg.goto(BASE + 'admin/index.html#dashboard'); await apg.wait_for_selector('#gq')
+        await apg.keyboard.press('Control+k'); await apg.keyboard.type('Fuite')
+        await apg.wait_for_selector('#gres:not([hidden]) button')
+        check('recherche globale trouve le ticket', 'Fuite' in await apg.text_content('#gres'))
+        await apg.screenshot(path=str(OUT / 'after-crm-search-desktop.png'))
+        # Erreur réseau simulée sur l’app résident
+        await pg.set_viewport_size({'width': 390, 'height': 844})
+        await pg.goto(BASE + 'app/index.html#/requests'); await pg.wait_for_timeout(200)
+        await pg.evaluate("() => { window.__FL_TEST_API__.tickets = async () => { throw new Error('Failed to fetch') }; }")
+        await pg.click('[data-act=goto][href="#/home"], .tab[href="#/home"]'); await pg.wait_for_timeout(200)
+        await pg.evaluate("() => dispatchEvent(new Event('online'))"); await pg.wait_for_selector('.banner-error')
+        btxt = await pg.text_content('.banner-error')
+        check('erreur réseau : message clair + bouton réessayer', any(w in btxt for w in ('réseau', 'network', 'רשת')) and await pg.is_visible('.banner-error [data-act=reload]'))
+        await pg.screenshot(path=str(OUT / 'after-resident-network-error-mobile.png'))
+        await pg.context.set_offline(True)
+        await pg.evaluate("() => dispatchEvent(new Event('offline'))"); await pg.wait_for_timeout(300)
+        check('bandeau hors connexion', await pg.is_visible('.offline-bar'))
+        await pg.screenshot(path=str(OUT / 'after-resident-offline-mobile.png'))
+        await pg.context.set_offline(False)
+
+        check('aucune erreur JavaScript', not errors, '; '.join(errors)[:300])
+        await b.close()
+    ok = sum(1 for r in results if r[1]); print(f'\n{ok}/{len(results)} vérifications réussies')
+    (OUT / 'e2e-results.json').write_text(json.dumps([{'test': n, 'ok': o, 'detail': d} for n, o, d in results], ensure_ascii=False, indent=1))
+    sys.exit(0 if ok == len(results) else 1)
+
+asyncio.run(main())

@@ -1,0 +1,61 @@
+/* 4FLORENTINE design system — tokens partagés (app résidents + CRM) */
+:root {
+  /* Nuit : la façade le soir, couleur de fond du logo */
+  --night-950: #08111E;
+  --night-900: #0A1424;
+  --night-800: #12223A;
+  --night-700: #1B3150;
+  --night-600: #2A4467;
+  --night-400: #6E83A0;
+  /* Or : le cadre du logo */
+  --gold-300: #E8D08F;
+  --gold-400: #D8B762;
+  --gold-500: #C9A24A;
+  --gold-600: #A9832F;
+  --gold-700: #7E611F;   /* or lisible sur fond clair (AA) */
+  /* Blanc cassé : la pierre de Jérusalem du hall */
+  --paper: #F6F4EE;
+  --paper-2: #EEEBE2;
+  --paper-3: #E3DECF;
+  --white: #FFFFFF;
+  --ink: #142033;
+  --ink-2: #4A5669;
+  --ink-3: #737D8C;
+  --line: #E1DBCB;
+  --line-2: #D2CAB6;
+
+  /* Statuts des demandes */
+  --st-new: #2F5D8A;         --st-new-bg: #E5EDF6;
+  --st-assigned: #5E4A9A;    --st-assigned-bg: #ECE8F6;
+  --st-progress: #A3620F;    --st-progress-bg: #FBEFD9;
+  --st-waiting: #7E611F;     --st-waiting-bg: #F4EDDA;
+  --st-resolved: #1D6E52;    --st-resolved-bg: #DFF1E8;
+  --st-closed: #4F5B6B;      --st-closed-bg: #E8EAEE;
+  --st-cancelled: #7D8693;   --st-cancelled-bg: #EEEFF1;
+  --pr-urgent: #B0302F;      --pr-urgent-bg: #FBE4E2;
+  --pr-high: #B5551F;        --pr-high-bg: #FCEADD;
+  --pr-normal: #3E5675;      --pr-normal-bg: #E8EDF3;
+  --pr-low: #737D8C;         --pr-low-bg: #EEEFF1;
+  --ok: #1D6E52;
+  --danger: #B0302F;
+
+  --font-ui: "IBM Plex Sans", "IBM Plex Sans Hebrew", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Frank Ruhl Libre", "IBM Plex Sans Hebrew", Georgia, serif;
+
+  /* Échelle typographique (ratio 1.2) */
+  --fs-xs: .75rem;  --fs-sm: .8125rem; --fs-base: .9375rem; --fs-md: 1.0625rem;
+  --fs-lg: 1.25rem; --fs-xl: 1.5rem;   --fs-2xl: 1.875rem;  --fs-3xl: 2.375rem;
+
+  --r-xs: 6px; --r-sm: 10px; --r-md: 14px; --r-lg: 20px; --r-xl: 28px; --r-pill: 999px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
+
+  --shadow-1: 0 1px 2px rgba(20,32,51,.06), 0 1px 1px rgba(20,32,51,.04);
+  --shadow-2: 0 10px 30px -12px rgba(10,20,36,.28);
+  --shadow-gold: 0 8px 24px -10px rgba(169,131,47,.55);
+  --ring: 0 0 0 3px rgba(201,162,74,.45);
+  --ease: cubic-bezier(.2,.7,.2,1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
