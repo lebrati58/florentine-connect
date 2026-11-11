@@ -163,7 +163,7 @@ function render() {
         <div class="nav-group">קישורים</div>
         <a class="nav-item" href="../app/" target="_blank" rel="noopener">${icon('link')}<span>אפליקציית הדיירים</span></a>
       </nav>
-      <div class="side-user"><span class="avatar">${esc(initials(C.me.full_name))}</span><div class="who"><b>${esc(C.me.full_name)}</b><small>${ROLES[C.me.role]}</small></div><button data-act="logout" title="התנתקות" aria-label="התנתקות">${icon('logout')}</button></div>
+      <div class="side-user"><span class="avatar">${esc(initials(C.me.full_name))}</span><div class="who"><b>${esc(C.me.full_name)}</b><small>${ROLES[C.me.role]}</small></div><button data-act="my-pass" title="שינוי סיסמה" aria-label="שינוי סיסמה">${icon('key')}</button><button data-act="logout" title="התנתקות" aria-label="התנתקות">${icon('logout')}</button></div>
     </aside>
     <div class="main">
       <header class="top">
@@ -714,7 +714,7 @@ function staffSheet() {
     <div class="field"><label for="stN">שם מלא</label><input class="input" id="stN" name="name" required maxlength="80"></div>
     <div class="field"><label for="stE">אימייל</label><input class="input" id="stE" name="email" type="email" dir="ltr" required></div>
     <div class="field"><label for="stR">תפקיד</label><select class="select" id="stR" name="role">${Object.entries(ROLES).filter(([k]) => k !== 'owner').map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}<option value="owner">בעלים</option></select></div>
-    <p class="hint">תיווצר סיסמה זמנית שתוצג פעם אחת. על איש הצוות לשנות אותה בכניסה הראשונה.</p>
+    <p class="hint">תיווצר סיסמה זמנית שתוצג פעם אחת. מסרו אותה לאיש הצוות; בכניסה הראשונה ישנה אותה דרך סמל המפתח שליד שמו.</p>
     <p class="form-error" role="alert"></p><button class="btn btn-gold btn-block" type="submit">יצירת חשבון</button></form>`, (ov) => {
     $('#stForm', ov).addEventListener('submit', async (e) => {
       e.preventDefault(); const f = e.target;
@@ -810,6 +810,17 @@ const actions = {
   'dir-restore': async (el) => { try { await api.restoreVersion(Number(el.dataset.id), Number(el.dataset.v)); toast(`גרסה ${el.dataset.v} שוחזרה`); C.data.directory = await api.directory(); render(); dirEntrySheet(Number(el.dataset.id)); } catch (x) { toast(errMsg(x), 'error'); } },
   'resolve-report': async (el) => { try { await api.resolveReport(Number(el.dataset.id)); toast('הדיווח סומן כמטופל'); C.data.reports = await api.directoryReports(); render(); } catch (x) { toast(errMsg(x), 'error'); } },
   'staff-form': () => staffSheet(),
+  'my-pass': () => sheet('שינוי סיסמה', `<form id="pwForm">
+    <div class="field"><label for="pw1">סיסמה חדשה (10 תווים לפחות)</label><input class="input" id="pw1" type="password" dir="ltr" autocomplete="new-password" minlength="10" required></div>
+    <div class="field"><label for="pw2">אימות הסיסמה</label><input class="input" id="pw2" type="password" dir="ltr" autocomplete="new-password" required></div>
+    <p class="form-error" role="alert"></p><button class="btn btn-gold btn-block" type="submit">${icon('key', 'ic-sm')}שמירה</button></form>`, (ov) => {
+    $('#pwForm', ov).addEventListener('submit', async (e) => {
+      e.preventDefault(); const a = $('#pw1', ov).value, b = $('#pw2', ov).value;
+      if (a.length < 10) return formErr(ov, 'הסיסמה חייבת להכיל 10 תווים לפחות.');
+      if (a !== b) return formErr(ov, 'הסיסמאות אינן תואמות.');
+      try { await api.changeSecret(a); toast('הסיסמה שונתה'); closeSheet(); } catch (x) { formErr(ov, errMsg(x)); }
+    });
+  }),
   'staff-active': async (el) => { try { await api.updateStaff(el.dataset.id, { active: el.dataset.v === 'true' }); C.data.staff = await api.staff(); render(); } catch (x) { toast(errMsg(x), 'error'); } },
   'g-ticket': (el) => { location.hash = 'tickets'; openTicket(Number(el.dataset.id)); },
   'g-apt': (el) => { const a = aptOf(Number(el.dataset.id)); C.aptTower = String(a.tower_id); C.aptQ = String(a.number); location.hash = 'buildings'; render(); },
