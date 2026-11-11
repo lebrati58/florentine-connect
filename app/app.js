@@ -3,6 +3,7 @@ import { T } from './i18n.js';
 import { icon } from '../assets/ds/icons.js';
 import {
   CATEGORIES, STATUSES, TRADES, OPEN_STATUSES, RESIDENT_STEPS, label, iconOf,
+  AREAS, COMMON_AREAS, ENTRANCES, CATEGORY_AREA, MUNICIPAL_106, isParking, devicePlatform,
   esc, $, $$, fmtDate, fmtDateTime, relTime, toast, errorKey, createApi,
 } from '../assets/js/core.js';
 
@@ -13,7 +14,7 @@ const S = {
   directory: null, dirError: null, dirTrade: '', dirQuery: '',
   reqTab: 'open', detail: null, detailError: null, photoUrls: {},
   shabbat: null, shabbatError: false, online: navigator.onLine,
-  login: { tower: null, error: '', busy: false },
+  login: { entrance: null, error: '', busy: false },
   draft: null, sent: null, installEvt: null, unsub: null,
 };
 let api;
@@ -142,9 +143,9 @@ function viewLogin() {
       <p class="lead">${t('loginLead')}</p>
       <form id="loginForm" novalidate>
         <div class="field">
-          <span class="label" id="towerLbl">${t('chooseTower')}</span>
-          <div class="tower-pick" role="group" aria-labelledby="towerLbl">
-            ${[1, 2, 3, 4].map(n => `<button type="button" data-act="pick-tower" data-tower="${n}" aria-pressed="${L1.tower === n}">${icon('towers')}<span>${t('towerN', { n })}</span></button>`).join('')}
+          <span class="label" id="entLbl">${t('chooseEntrance')}</span>
+          <div class="entrance-pick" role="group" aria-labelledby="entLbl">
+            ${[1, 2, 3, 4].map(tw => `<div class="ent-group">${ENTRANCES.filter(e => e.tower === tw).map(e => `<button type="button" data-act="pick-entrance" data-entrance="${e.id}" aria-pressed="${L1.entrance === e.id}" aria-label="${t('entranceN', { n: e.id })}"><b>${e.id}</b></button>`).join('')}<span>${t('towerN', { n: tw })}</span></div>`).join('')}
           </div>
         </div>
         <div class="field">
@@ -175,12 +176,12 @@ function afterLogin() {
     ev.preventDefault();
     const number = f.apt.value.trim(), pin = f.pin.value.trim();
     sessionStorage.setItem('fl-login-apt', number);
-    if (!S.login.tower) { S.login.error = t('chooseTower'); return render(); }
+    if (!S.login.entrance) { S.login.error = t('chooseEntrance'); return render(); }
     if (!/^[0-9]{1,4}[A-Za-z]?$/.test(number)) { S.login.error = t('aptNumber') + ' : ' + t('required'); return render(); }
     if (!/^[0-9]{6}$/.test(pin)) { S.login.error = t('pinFormat'); return render(); }
     S.login.busy = true; S.login.error = ''; render();
     try {
-      await api.signInApartment(S.login.tower, number, pin);
+      await api.signInApartment(S.login.entrance, number, pin);
       await onSignedIn();
     } catch (e) {
       S.login.error = errMsg(e);
@@ -233,7 +234,7 @@ function viewHome() {
   <section class="hero"><div class="hero-inner">
     ${frameSvg}
     <h1 class="greet">${greeting()}</h1>
-    <div class="where"><span class="chip-dark">${icon('towers')}${t('towerN', { n: S.apt.tower_id })}</span><span class="chip-dark">${icon('home')}${t('aptShort', { n: esc(S.apt.number) })}</span>${S.apt.floor != null ? `<span class="chip-dark">${t('floorN', { n: S.apt.floor })}</span>` : ''}</div>
+    <div class="where"><span class="chip-dark">${icon('towers')}${t('entranceN', { n: S.apt.entrance })}</span><span class="chip-dark">${icon('home')}${t('aptShort', { n: esc(S.apt.number) })}</span>${S.apt.floor != null ? `<span class="chip-dark">${t('floorN', { n: S.apt.floor })}</span>` : ''}</div>
     ${shabbatBlock()}
   </div></section>
   <div class="cta-report"><button type="button" data-act="goto" data-href="#/new">
@@ -285,7 +286,7 @@ function reqCard(x) {
     <span class="cat">${icon(iconOf(CATEGORIES, x.category))}</span>
     <span class="top"><span class="ref">${esc(x.ref)}</span><span class="badge st-${x.status}">${L(STATUSES, x.status)}</span></span>
     <h3>${esc(x.title)}</h3>
-    <span class="meta">${t('updated', { t: relTime(x.updated_at, S.lang) })}</span>
+    <span class="meta">${x.area && x.area !== 'apartment' ? esc(L(AREAS, x.area)) + (x.entrance ? ' · ' + t('entranceN', { n: x.entrance }) : '') + ' · ' : ''}${t('updated', { t: relTime(x.updated_at, S.lang) })}</span>
     <span style="grid-column:2">${stepsBar(x.status)}</span>
   </button>`;
 }
@@ -296,7 +297,7 @@ function annText(a) {
 function noticeCard(a) {
   const { title, body } = annText(a);
   return `<article class="notice ${a.pinned ? 'pinned' : ''} ${a.category === 'urgent' ? 'urgent' : ''}">
-    <div class="n-meta">${a.pinned ? icon('pin', 'ic-sm') : icon('megaphone', 'ic-sm')}<span>${esc(fmtDate(a.starts_at, S.lang, { day: 'numeric', month: 'long' }))}</span>${a.tower_id ? `<span>${t('towerN', { n: a.tower_id })}</span>` : ''}</div>
+    <div class="n-meta">${a.pinned ? icon('pin', 'ic-sm') : icon('megaphone', 'ic-sm')}<span>${esc(fmtDate(a.starts_at, S.lang, { day: 'numeric', month: 'long' }))}</span>${a.entrance ? `<span>${t('entranceN', { n: a.entrance })}</span>` : a.tower_id ? `<span>${t('towerN', { n: a.tower_id })}</span>` : ''}</div>
     <h3>${esc(title)}</h3><p>${esc(body)}</p>
   </article>`;
 }
@@ -345,8 +346,8 @@ function viewDetail() {
     <section class="section"><div class="section-head"><h2>${t('information')}</h2></div><div class="panel"><dl class="facts">
       <div><dt>${t('category')}</dt><dd>${L(CATEGORIES, x.category)}</dd></div>
       <div><dt>${t('created')}</dt><dd>${esc(fmtDateTime(x.created_at, S.lang))}</dd></div>
-      <div><dt>${t('location')}</dt><dd>${x.location === 'common' ? t('commonArea') : t('inMyApt')}</dd></div>
-      <div><dt>${t('tower')}</dt><dd>${t('towerN', { n: x.tower_id })}${x.floor != null ? ' / ' + t('floorN', { n: x.floor }) : ''}</dd></div>
+      <div><dt>${t('location')}</dt><dd>${x.area && x.area !== 'apartment' ? L(AREAS, x.area) : x.location === 'common' ? t('commonArea') : t('inMyApt')}</dd></div>
+      <div><dt>${t('entrance')}</dt><dd>${x.entrance ? t('entranceN', { n: x.entrance }) : isParking(x.area) ? t('allTowers') : '—'}${x.floor != null ? ' / ' + t('floorN', { n: x.floor }) : ''}</dd></div>
       ${x.location_detail ? `<div class="wide"><dt>${t('locationDetail')}</dt><dd>${esc(x.location_detail)}</dd></div>` : ''}
       ${x.description ? `<div class="wide"><dt>${t('details')}</dt><dd class="text">${esc(x.description)}</dd></div>` : ''}
     </dl>
@@ -379,30 +380,59 @@ function evRow(e) {
 }
 
 /* ---------- nouvelle demande ---------- */
-function newDraft() { return { location: 'apartment', tower: S.apt?.tower_id || 1, floor: '', detail: '', category: '', title: '', description: '', urgent: false, files: [], errors: {}, busy: false }; }
+function newDraft() { return { location: 'apartment', area: 'apartment', entrance: S.apt?.entrance || 1, floor: '', detail: '', category: '', title: '', description: '', urgent: false, files: [], errors: {}, busy: false }; }
+
+/* Encadrés d'aide affichés selon la catégorie choisie */
+function municipalBlock() {
+  const pf = devicePlatform();
+  const store = (os) => `<a class="btn ${pf === os ? 'btn-gold' : 'btn-line'} btn-sm" href="${MUNICIPAL_106[os]}" target="_blank" rel="noopener">${icon('smartphone', 'ic-sm')}${t(os === 'ios' ? 'store_ios' : 'store_android')}</a>`;
+  const steps = pf === 'ios' ? 'muniStepsIos' : pf === 'android' ? 'muniStepsAndroid' : 'muniStepsAny';
+  return `<div class="btn-row" style="margin-top:10px">${pf === 'android' ? store('android') + store('ios') : store('ios') + store('android')}</div>
+    <ol class="guide-steps">${t(steps).split('|').map(x => `<li>${esc(x)}</li>`).join('')}</ol>
+    <div class="btn-row"><a class="btn btn-line btn-sm" href="${MUNICIPAL_106.whatsapp}" target="_blank" rel="noopener">${icon('message', 'ic-sm')}WhatsApp 106+</a>
+      <a class="btn btn-line btn-sm" href="${MUNICIPAL_106.web}" target="_blank" rel="noopener">${icon('globe', 'ic-sm')}${t('muniWeb')}</a>
+      <a class="btn btn-line btn-sm" href="tel:${encodeURIComponent(MUNICIPAL_106.phone)}" dir="ltr">${icon('phone', 'ic-sm')}${MUNICIPAL_106.phone}</a></div>`;
+}
+function categoryGuide(cat) {
+  if (cat === 'beggars') return `<div class="guide guide-city">${icon('hand')}<div><strong>${t('guideBeggarsTitle')}</strong><p>${t('guideBeggarsText')}</p>${municipalBlock()}<p class="hint">${t('guideStillReport')}</p></div></div>`;
+  if (cat === 'noise_works') return `<div class="guide">${icon('hammer')}<div><strong>${t('guideWorksTitle')}</strong><p>${t('guideWorksText')}</p><details><summary>${t('guideWorksCity')}</summary>${municipalBlock()}</details></div></div>`;
+  if (cat === 'odor') return `<div class="guide guide-danger">${icon('alert')}<div><strong>${t('guideGasTitle')}</strong><p>${t('guideGasText')}</p><a class="btn btn-danger btn-sm" href="tel:102">${icon('phone', 'ic-sm')}102</a></div></div>`;
+  if (cat === 'alarm') return `<div class="guide guide-danger">${icon('alert')}<div><strong>${t('guideFireTitle')}</strong><p>${t('guideFireText')}</p><a class="btn btn-danger btn-sm" href="tel:102">${icon('phone', 'ic-sm')}102</a></div></div>`;
+  if (cat === 'robotic_parking') return `<div class="guide">${icon('robot')}<div><strong>${L(AREAS, 'parking_1')}</strong><p>${t('guideRobotText')}</p></div></div>`;
+  if (cat === 'parking_gate') return `<div class="guide">${icon('gate')}<div><strong>${L(AREAS, 'parking_2')}</strong><p>${t('guideGateText')}</p></div></div>`;
+  return '';
+}
 function viewNew() {
   const d = S.draft || (S.draft = newDraft());
+  const fixedArea = CATEGORY_AREA[d.category];
+  const area = AREAS.find(a => a.key === d.area) || AREAS[0];
   return `<div class="page form-page">
     <div class="page-head"><h1>${t('newRequest')}</h1><p>${t('reportLead')}</p></div>
     <form id="newForm" novalidate>
-      <div class="form-step"><h2><span class="n">1</span>${t('where')}</h2>
+      <div class="form-step"><h2><span class="n">1</span>${t('whatKind')}</h2>
+        <div class="cat-grid" role="group">${CATEGORIES.filter(c => !c.hidden).map(c => `<button type="button" data-act="cat" data-cat="${c.key}" aria-pressed="${d.category === c.key}">${icon(c.icon)}<span>${c[S.lang]}</span></button>`).join('')}</div>
+        ${d.errors.category ? `<p class="form-error" role="alert" style="margin-top:8px">${t('chooseCategory')}</p>` : ''}
+        ${categoryGuide(d.category)}
+      </div>
+      <div class="form-step"><h2><span class="n">2</span>${t('where')}</h2>
+        ${fixedArea ? `<div class="choice" aria-pressed="true" style="cursor:default">${icon('car')}<span>${L(AREAS, fixedArea)}<br><small style="color:var(--ink-3);font-weight:400">${t('sharedParking')}</small></span></div>` : `
         <div class="choice-2" role="group">
-          <button type="button" class="choice" data-act="loc" data-loc="apartment" aria-pressed="${d.location === 'apartment'}">${icon('home')}<span>${t('inMyApt')}<br><small style="color:var(--ink-3);font-weight:400">${t('towerN', { n: S.apt.tower_id })}, ${t('aptShort', { n: esc(S.apt.number) })}</small></span></button>
+          <button type="button" class="choice" data-act="loc" data-loc="apartment" aria-pressed="${d.location === 'apartment'}">${icon('home')}<span>${t('inMyApt')}<br><small style="color:var(--ink-3);font-weight:400">${t('entranceN', { n: S.apt.entrance })}, ${t('aptShort', { n: esc(S.apt.number) })}</small></span></button>
           <button type="button" class="choice" data-act="loc" data-loc="common" aria-pressed="${d.location === 'common'}">${icon('building')}<span>${t('commonArea')}</span></button>
         </div>
-        ${d.location === 'common' ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
-          <div class="field"><label for="fTower">${t('tower')}</label><select class="select" id="fTower" name="tower">${[1, 2, 3, 4].map(n => `<option value="${n}" ${Number(d.tower) === n ? 'selected' : ''}>${t('towerN', { n })}</option>`).join('')}</select></div>
-          <div class="field"><label for="fFloor">${t('floor')}</label><input class="input" id="fFloor" name="floor" inputmode="numeric" value="${esc(d.floor)}" maxlength="3"></div>
-        </div>
-        <div class="field"><label for="fDetail">${t('locationDetail')}</label><input class="input" id="fDetail" name="detail" maxlength="120" value="${esc(d.detail)}" placeholder="${t('locationDetailPh')}"></div>` : ''}
-      </div>
-      <div class="form-step"><h2><span class="n">2</span>${t('whatKind')}</h2>
-        <div class="cat-grid" role="group">${CATEGORIES.map(c => `<button type="button" data-act="cat" data-cat="${c.key}" aria-pressed="${d.category === c.key}">${icon(c.icon)}<span>${c[S.lang]}</span></button>`).join('')}</div>
-        ${d.errors.category ? `<p class="form-error" role="alert" style="margin-top:8px">${t('chooseCategory')}</p>` : ''}
+        ${d.location === 'common' ? `
+        <div class="area-grid" role="group" aria-label="${t('whichArea')}">${COMMON_AREAS.map(a => `<button type="button" data-act="area" data-area="${a.key}" aria-pressed="${d.area === a.key}">${icon(a.icon)}<span>${a[S.lang]}</span></button>`).join('')}</div>
+        ${d.errors.area ? `<p class="form-error" role="alert" style="margin-top:8px">${t('chooseArea')}</p>` : ''}
+        ${isParking(d.area) ? `<p class="hint" style="margin-top:8px">${t('sharedParking')}</p>` : d.area && d.area !== 'apartment' ? `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+          <div class="field"><label for="fEntrance">${t('entrance')}</label><select class="select" id="fEntrance" name="entrance">${ENTRANCES.map(e => `<option value="${e.id}" ${Number(d.entrance) === e.id ? 'selected' : ''}>${t('entranceN', { n: e.id })}</option>`).join('')}</select></div>
+          ${area.key === 'stairs' || area.key === 'other' ? `<div class="field"><label for="fFloor">${t('floor')}</label><input class="input" id="fFloor" name="floor" inputmode="numeric" value="${esc(d.floor)}" maxlength="3"></div>` : '<span></span>'}
+        </div>` : ''}
+        ${d.area && d.area !== 'apartment' ? `<div class="field" style="margin-top:4px"><label for="fDetail">${t('locationDetail')}</label><input class="input" id="fDetail" name="detail" maxlength="120" value="${esc(d.detail)}" placeholder="${t(isParking(d.area) ? 'locationDetailParkingPh' : 'locationDetailPh')}"></div>` : ''}` : ''}`}
       </div>
       <div class="form-step"><h2><span class="n">3</span>${t('details')}</h2>
-        <div class="field"><label for="fTitle">${t('title')}</label><input class="input" id="fTitle" name="title" maxlength="120" value="${esc(d.title)}" placeholder="${t('titlePh')}" ${d.errors.title ? 'aria-invalid="true"' : ''} required>${d.errors.title ? `<span class="form-error">${t('required')}</span>` : ''}</div>
-        <div class="field"><label for="fDesc">${t('details')}</label><textarea class="textarea" id="fDesc" name="description" maxlength="2000" placeholder="${t('detailsPh')}">${esc(d.description)}</textarea></div>
+        <div class="field"><label for="fTitle">${t('title')}</label><input class="input" id="fTitle" name="title" maxlength="120" value="${esc(d.title)}" placeholder="${t(d.category === 'noise_works' ? 'titleWorksPh' : 'titlePh')}" ${d.errors.title ? 'aria-invalid="true"' : ''} required>${d.errors.title ? `<span class="form-error">${t('required')}</span>` : ''}</div>
+        <div class="field"><label for="fDesc">${t('details')}</label><textarea class="textarea" id="fDesc" name="description" maxlength="2000" placeholder="${t(d.category === 'noise_works' ? 'detailsWorksPh' : 'detailsPh')}">${esc(d.description)}</textarea></div>
         <label class="urgent-toggle"><input type="checkbox" name="urgent" ${d.urgent ? 'checked' : ''}><span><strong>${t('urgent')}</strong><small>${t('urgentHint')}</small></span></label>
       </div>
       <div class="form-step"><h2><span class="n">4</span>${t('photos')}</h2>
@@ -421,7 +451,7 @@ function captureDraft() {
   const f = $('#newForm'); if (!f || !S.draft) return;
   const d = S.draft;
   d.title = f.title.value; d.description = f.description.value; d.urgent = f.urgent.checked;
-  if (f.tower) d.tower = f.tower.value;
+  if (f.entrance) d.entrance = f.entrance.value;
   if (f.floor) d.floor = f.floor.value;
   if (f.detail) d.detail = f.detail.value;
 }
@@ -437,15 +467,18 @@ function bindNewForm() {
     ev.preventDefault(); captureDraft();
     const d = S.draft; d.errors = {}; d.error = '';
     if (!d.category) d.errors.category = true;
+    const area = CATEGORY_AREA[d.category] || (d.location === 'apartment' ? 'apartment' : d.area);
+    if (d.location === 'common' && !CATEGORY_AREA[d.category] && (!area || area === 'apartment')) d.errors.area = true;
     if (d.title.trim().length < 3) d.errors.title = true;
     if (Object.keys(d.errors).length) { render(); return; }
     d.busy = true; render();
+    const common = area !== 'apartment';
     const payload = {
-      location: d.location, category: d.category, title: d.title.trim(),
+      location: common ? 'common' : 'apartment', area, category: d.category, title: d.title.trim(),
       description: d.description.trim() || null, priority: d.urgent ? 'urgent' : 'normal',
-      tower_id: d.location === 'common' ? Number(d.tower) : S.apt.tower_id,
-      floor: d.location === 'common' && d.floor !== '' && !isNaN(Number(d.floor)) ? Number(d.floor) : null,
-      location_detail: d.location === 'common' ? (d.detail.trim() || null) : null,
+      entrance: !common ? S.apt.entrance : isParking(area) ? null : Number(d.entrance),
+      floor: common && d.floor !== '' && !isNaN(Number(d.floor)) ? Number(d.floor) : null,
+      location_detail: common ? (d.detail.trim() || null) : null,
       apartment_id: S.apt.id,
     };
     try {
@@ -512,8 +545,8 @@ function viewBuilding() {
   return `<div class="page">
     <div class="page-head"><h1>${t('buildingTitle')}</h1></div>
     <div class="tower-card" style="margin-top:10px"><img src="../assets/brand/emblem.webp" alt="">
-      <h2>${t('towerN', { n: S.apt.tower_id })}</h2>
-      <p>${t('aptShort', { n: esc(S.apt.number) })}${S.apt.floor != null ? ', ' + t('floorN', { n: S.apt.floor }) : ''}${tw.floors ? ', ' + t('floors', { n: tw.floors }) : ''}${tw.address ? '<br>' + esc(tw.address) : ''}</p>
+      <h2>${t('entranceN', { n: S.apt.entrance })}</h2>
+      <p>${t('towerN', { n: S.apt.tower_id })} · ${t('aptShort', { n: esc(S.apt.number) })}${S.apt.floor != null ? ', ' + t('floorN', { n: S.apt.floor }) : ''}${tw.floors ? ', ' + t('floors', { n: tw.floors }) : ''}${tw.address ? '<br>' + esc(tw.address) : ''}</p>
     </div>
     ${tw.notes ? `<div class="panel" style="margin-top:12px;white-space:pre-wrap">${esc(tw.notes)}</div>` : ''}
     <section class="section"><div class="section-head"><h2>${t('shabbat')}</h2></div><div style="background:var(--night-900);border-radius:var(--r-md);padding:2px 12px 12px">${shabbatBlock()}</div></section>
@@ -554,7 +587,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet
 
 function accountSheet() {
   openSheet(t('account'), `
-    <div class="panel" style="margin-bottom:16px"><strong>${t('towerN', { n: S.apt.tower_id })}, ${t('aptShort', { n: esc(S.apt.number) })}</strong><p class="hint" style="margin:4px 0 0">${t('sharedAccount')}</p></div>
+    <div class="panel" style="margin-bottom:16px"><strong>${t('entranceN', { n: S.apt.entrance })}, ${t('aptShort', { n: esc(S.apt.number) })}</strong><p class="hint" style="margin:4px 0 0">${t('sharedAccount')}</p></div>
     <div class="field"><span class="label">${t('language')}</span><div class="seg" role="group">${[['fr', 'Français'], ['he', 'עברית'], ['en', 'English']].map(([k, v]) => `<button type="button" data-act="lang" data-lang="${k}" aria-pressed="${S.lang === k}" lang="${k}">${v}</button>`).join('')}</div></div>
     <form id="pinForm" novalidate>
       <h3 style="font-size:var(--fs-md);margin:18px 0 10px">${t('changePin')}</h3>
@@ -669,15 +702,21 @@ function reportSheet(id) {
 const actions = {
   lang: (el) => { setLang(el.dataset.lang); if ($('.overlay')) accountSheet(); },
   'cycle-lang': () => setLang({ fr: 'he', he: 'en', en: 'fr' }[S.lang]),
-  'pick-tower': (el) => { const f = $('#loginForm'); const apt = f?.apt.value; S.login.tower = Number(el.dataset.tower); S.login.error = ''; render(); if (apt) $('#loginForm').apt.value = apt; $('#aptInput')?.focus(); },
+  'pick-entrance': (el) => { const f = $('#loginForm'); const apt = f?.apt.value; S.login.entrance = Number(el.dataset.entrance); S.login.error = ''; render(); if (apt) $('#loginForm').apt.value = apt; $('#aptInput')?.focus(); },
   'reveal-pin': (el) => { const i = $('#pinInput'); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; el.innerHTML = icon(show ? 'eye-off' : 'eye'); el.setAttribute('aria-label', show ? t('hidePin') : t('showPin')); },
   goto: (el) => { closeSheet(); go(el.dataset.href); },
   account: () => accountSheet(),
   signout: async () => { closeSheet(); S.unsub?.(); S.unsub = null; await api.signOut(); Object.assign(S, { session: null, apt: null, tickets: null, announcements: null, directory: null, detail: null, draft: null, sent: null }); location.hash = ''; render(); },
   'req-tab': (el) => { S.reqTab = el.dataset.tab; render(); },
   reload: async (el) => { const k = el.dataset.kind; if (k === 'tickets') { S.tickets = null; S.ticketsError = null; render(); await loadTickets(); } else if (k === 'ann') { S.announcements = null; S.annError = null; render(); await loadAnnouncements(); } else if (k === 'dir') { S.directory = null; S.dirError = null; render(); await loadDirectory(); } else { S.detail = null; S.detailError = null; } render(); },
-  loc: (el) => { captureDraft(); S.draft.location = el.dataset.loc; render(); },
-  cat: (el) => { captureDraft(); S.draft.category = el.dataset.cat; S.draft.errors.category = false; render(); },
+  loc: (el) => { captureDraft(); S.draft.location = el.dataset.loc; S.draft.area = el.dataset.loc === 'apartment' ? 'apartment' : ''; render(); },
+  area: (el) => { captureDraft(); S.draft.area = el.dataset.area; S.draft.errors.area = false; render(); },
+  cat: (el) => {
+    captureDraft(); const d = S.draft; d.category = el.dataset.cat; d.errors.category = false;
+    if (CATEGORY_AREA[d.category]) { d.location = 'common'; d.area = CATEGORY_AREA[d.category]; }
+    else if (['beggars'].includes(d.category) && d.location === 'apartment') { d.location = 'common'; d.area = 'outside'; }
+    render();
+  },
   'rm-photo': (el) => { captureDraft(); const [x] = S.draft.files.splice(Number(el.dataset.i), 1); URL.revokeObjectURL(x.url); render(); },
   'sent-track': (el) => { const id = el.dataset.id; S.sent = null; go('#/requests/' + id); },
   'sent-home': () => { S.sent = null; go('#/home'); },

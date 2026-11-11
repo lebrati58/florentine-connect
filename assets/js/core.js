@@ -3,18 +3,65 @@ import { CONFIG } from './config.js';
 
 /* ---------- Référentiels (clés stables, libellés traduits) ---------- */
 export const CATEGORIES = [
-  { key: 'elevator',     icon: 'elevator',  fr: 'Ascenseur',          he: 'מעלית',          en: 'Elevator' },
-  { key: 'plumbing',     icon: 'droplet',   fr: 'Eau / fuite',        he: 'מים / נזילה',     en: 'Water / leak' },
-  { key: 'electricity',  icon: 'zap',       fr: 'Électricité',        he: 'חשמל',           en: 'Electricity' },
-  { key: 'cleaning',     icon: 'sparkles',  fr: 'Propreté',           he: 'ניקיון',          en: 'Cleaning' },
-  { key: 'security',     icon: 'shield',    fr: 'Sécurité / portes',  he: 'ביטחון / דלתות',  en: 'Security / doors' },
-  { key: 'ac',           icon: 'wind',      fr: 'Climatisation',      he: 'מיזוג אוויר',     en: 'Air conditioning' },
-  { key: 'parking',      icon: 'car',       fr: 'Parking',            he: 'חניה',           en: 'Parking' },
-  { key: 'intercom',     icon: 'intercom',  fr: 'Interphone',         he: 'אינטרקום',        en: 'Intercom' },
-  { key: 'common_areas', icon: 'building',  fr: 'Parties communes',   he: 'שטחים משותפים',   en: 'Common areas' },
-  { key: 'pests',        icon: 'bug',       fr: 'Nuisibles',          he: 'מזיקים',          en: 'Pests' },
-  { key: 'other',        icon: 'dots',      fr: 'Autre',              he: 'אחר',            en: 'Other' },
+  { key: 'plumbing',        icon: 'droplet',  fr: 'Fuite / eau',               he: 'נזילה / מים',            en: 'Leak / water' },
+  { key: 'elevator',        icon: 'elevator', fr: 'Ascenseur',                 he: 'מעלית',                 en: 'Elevator' },
+  { key: 'robotic_parking', icon: 'robot',    fr: 'Parking robotisé (-1)',     he: 'חניון רובוטי (‎-1)', en: 'Robotic parking (-1)' },
+  { key: 'parking_gate',    icon: 'gate',     fr: 'Barrière du parking (-2)',  he: 'מחסום החניון (‎-2)', en: 'Parking barrier (-2)' },
+  { key: 'alarm',           icon: 'bell',     fr: 'Alarme / bruit',            he: 'אזעקה / רעש',            en: 'Alarm / noise' },
+  { key: 'odor',            icon: 'odor',     fr: 'Odeurs',                    he: 'ריחות',                  en: 'Odors' },
+  { key: 'noise_works',     icon: 'hammer',   fr: 'Travaux hors horaires',     he: 'עבודות בשעות אסורות',     en: 'Works at forbidden hours' },
+  { key: 'beggars',         icon: 'hand',     fr: 'Mendicité',                 he: 'קבצנות',                 en: 'Begging' },
+  { key: 'electricity',     icon: 'zap',      fr: 'Électricité',               he: 'חשמל',                   en: 'Electricity' },
+  { key: 'cleaning',        icon: 'sparkles', fr: 'Propreté',                  he: 'ניקיון',                  en: 'Cleaning' },
+  { key: 'security',        icon: 'shield',   fr: 'Portes / sécurité',         he: 'דלתות / ביטחון',          en: 'Doors / security' },
+  { key: 'intercom',        icon: 'intercom', fr: 'Interphone',                he: 'אינטרקום',                en: 'Intercom' },
+  { key: 'ac',              icon: 'wind',     fr: 'Climatisation',             he: 'מיזוג אוויר',             en: 'Air conditioning' },
+  { key: 'pests',           icon: 'bug',      fr: 'Nuisibles',                 he: 'מזיקים',                 en: 'Pests' },
+  { key: 'other',           icon: 'dots',     fr: 'Autre',                     he: 'אחר',                    en: 'Other' },
+  // anciennes clés, conservées pour l'affichage des tickets existants
+  { key: 'parking',         icon: 'car',      fr: 'Parking',                   he: 'חניה',                   en: 'Parking', hidden: true },
+  { key: 'common_areas',    icon: 'building', fr: 'Parties communes',          he: 'שטחים משותפים',           en: 'Common areas', hidden: true },
 ];
+
+/* Zones de la résidence. Les parkings sont communs aux 4 tours. */
+export const AREAS = [
+  { key: 'apartment', icon: 'home',     fr: 'Appartement',              he: 'בתוך הדירה',      en: 'Apartment' },
+  { key: 'lobby',     icon: 'building', fr: 'Lobby',                    he: 'לובי',           en: 'Lobby',                perEntrance: true },
+  { key: 'parking_1', icon: 'car',      fr: 'Parking -1',               he: 'חניון ‎-1',  en: 'Parking -1' },
+  { key: 'parking_2', icon: 'car',      fr: 'Parking -2',               he: 'חניון ‎-2',  en: 'Parking -2' },
+  { key: 'stairs',    icon: 'stairs',   fr: 'Escaliers / paliers',      he: 'חדר מדרגות',     en: 'Stairs / landings',    perEntrance: true },
+  { key: 'garbage',   icon: 'trash',    fr: 'Local poubelles',          he: 'חדר אשפה',       en: 'Garbage room',         perEntrance: true },
+  { key: 'roof',      icon: 'roof',     fr: 'Toit',                     he: 'גג',             en: 'Roof',                 perEntrance: true },
+  { key: 'outside',   icon: 'pin',      fr: 'Abords de l’immeuble',     he: 'מחוץ לבניין',     en: 'Outside the building', perEntrance: true },
+  { key: 'other',     icon: 'dots',     fr: 'Autre endroit',            he: 'מקום אחר',        en: 'Somewhere else' },
+];
+export const COMMON_AREAS = AREAS.filter(a => a.key !== 'apartment');
+export const isParking = (area) => area === 'parking_1' || area === 'parking_2';
+/* Catégories qui fixent la zone d'elles-mêmes */
+export const CATEGORY_AREA = { robotic_parking: 'parking_1', parking_gate: 'parking_2' };
+
+/* 6 entrées réparties en 4 tours : 1-2 → tour 1 · 3 → tour 2 · 4-5 → tour 3 · 6 → tour 4 */
+export const ENTRANCES = [
+  { id: 1, tower: 1 }, { id: 2, tower: 1 }, { id: 3, tower: 2 },
+  { id: 4, tower: 3 }, { id: 5, tower: 3 }, { id: 6, tower: 4 },
+];
+export const towerOfEntrance = (e) => (ENTRANCES.find(x => x.id === Number(e)) || {}).tower || null;
+export const entrancesOfTower = (t) => ENTRANCES.filter(x => x.tower === Number(t)).map(x => x.id);
+
+/* Centre municipal 106+ de Tel-Aviv-Yafo (source : tel-aviv.gov.il/Contact/Pages/106.aspx) */
+export const MUNICIPAL_106 = {
+  android: 'https://play.google.com/store/apps/details?id=gov.telaviv.hazardreports106',
+  ios: 'https://apps.apple.com/app/id1139774362',
+  whatsapp: 'https://wa.me/972521208239',
+  web: 'https://www5.tel-aviv.gov.il/TlvForms/106plus/',
+  phone: '*9106',
+};
+export const devicePlatform = () => {
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+  if (/Android/i.test(ua)) return 'android';
+  return 'other';
+};
 
 export const STATUSES = [
   { key: 'new',         fr: 'Reçue',         he: 'חדשה',        en: 'Received' },
@@ -128,8 +175,8 @@ export function errorKey(e) {
 }
 
 /* ---------- Client Supabase ---------- */
-export function apartmentEmail(towerId, number) {
-  return `apt-${towerId}-${String(number).trim().toLowerCase()}@${CONFIG.apartmentEmailDomain}`;
+export function apartmentEmail(entrance, number) {
+  return `apt-e${entrance}-${String(number).trim().toLowerCase()}@${CONFIG.apartmentEmailDomain}`;
 }
 
 export function createApi(storageKey) {
@@ -146,8 +193,8 @@ export function createApi(storageKey) {
     /* Auth */
     async session() { return (await sb.auth.getSession()).data.session; },
     onAuth(cb) { return sb.auth.onAuthStateChange((_e, s) => cb(s)); },
-    async signInApartment(towerId, number, pin) {
-      return must(await sb.auth.signInWithPassword({ email: apartmentEmail(towerId, number), password: pin }));
+    async signInApartment(entrance, number, pin) {
+      return must(await sb.auth.signInWithPassword({ email: apartmentEmail(entrance, number), password: pin }));
     },
     async signInStaff(email, password) { return must(await sb.auth.signInWithPassword({ email, password })); },
     async signUpStaff(email, password) { return must(await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } })); },
@@ -156,7 +203,7 @@ export function createApi(storageKey) {
 
     /* Référentiel */
     async towers() { return must(await sb.from('towers').select('*').order('id')); },
-    async myApartment() { return must(await sb.from('apartments').select('id, tower_id, number, floor').maybeSingle()); },
+    async myApartment() { return must(await sb.from('apartments').select('id, entrance, tower_id, number, floor').maybeSingle()); },
     async meStaff() {
       const s = await this.session(); if (!s) return null;
       return must(await sb.from('staff').select('*').eq('user_id', s.user.id).maybeSingle());
@@ -254,7 +301,7 @@ export function createApi(storageKey) {
     /* CRM : équipe, appartements, fournisseurs, interventions */
     async staff() { return must(await sb.from('staff').select('*').order('full_name')); },
     async updateStaff(userId, patch) { return must(await sb.from('staff').update(patch).eq('user_id', userId)); },
-    async apartments() { return must(await sb.from('apartments').select('id, tower_id, number, floor, label, active, pin_set_at, user_id').order('tower_id').order('number')); },
+    async apartments() { return must(await sb.from('apartments').select('id, entrance, tower_id, number, floor, label, active, pin_set_at, user_id').order('entrance').order('number')); },
     async addApartments(rows) { return must(await sb.from('apartments').insert(rows).select()); },
     async updateApartment(id, patch) { return must(await sb.from('apartments').update(patch).eq('id', id)); },
     async updateTower(id, patch) { return must(await sb.from('towers').update(patch).eq('id', id)); },

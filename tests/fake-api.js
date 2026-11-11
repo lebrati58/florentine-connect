@@ -10,15 +10,15 @@
   if (!db) {
     db = {
       seq: 1, users: {
-        'apt-1-12': { id: 'u-a', pin: '482913', kind: 'apartment' },
-        'apt-2-30': { id: 'u-b', pin: '730155', kind: 'apartment' },
+        'apt-e1-12': { id: 'u-a', pin: '482913', kind: 'apartment' },
+        'apt-e3-30': { id: 'u-b', pin: '730155', kind: 'apartment' },
         'danny@test.local': { id: 'u-staff', pin: 'manager-pass', kind: 'staff' },
       },
       towers: [1, 2, 3, 4].map(id => ({ id, name: 'Tour ' + id, name_he: 'בניין ' + id, floors: null, address: null, notes: null })),
       staff: [{ user_id: 'u-staff', full_name: 'Danny', role: 'owner', active: true, created_at: now() }],
       apartments: [
-        { id: 1, tower_id: 1, number: '12', floor: 3, label: null, user_id: 'u-a', active: true, pin_set_at: now() },
-        { id: 2, tower_id: 2, number: '30', floor: 7, label: null, user_id: 'u-b', active: true, pin_set_at: now() },
+        { id: 1, entrance: 1, tower_id: 1, number: '12', floor: 3, label: null, user_id: 'u-a', active: true, pin_set_at: now() },
+        { id: 2, entrance: 3, tower_id: 2, number: '30', floor: 7, label: null, user_id: 'u-b', active: true, pin_set_at: now() },
       ],
       tickets: [], events: [], photos: [], vendors: [], interventions: [], announcements: [],
       directory: [], revisions: [], recos: [], reports: [],
@@ -44,8 +44,8 @@
     sb: null,
     async session() { return session; },
     onAuth() { return { data: { subscription: { unsubscribe() {} } } }; },
-    async signInApartment(tower, number, pin) {
-      const u = db.users[`apt-${tower}-${String(number).toLowerCase()}`];
+    async signInApartment(entrance, number, pin) {
+      const u = db.users[`apt-e${entrance}-${String(number).toLowerCase()}`];
       if (!u || u.pin !== pin) fail('Invalid login credentials');
       setSession({ user: { id: u.id } }); return delay({});
     },
@@ -54,7 +54,7 @@
     async changeSecret() { return delay({}); },
     async signOut() { setSession(null); },
     async towers() { return delay(db.towers); },
-    async myApartment() { const a = myApt(); return delay(a ? { id: a.id, tower_id: a.tower_id, number: a.number, floor: a.floor } : null); },
+    async myApartment() { const a = myApt(); return delay(a ? { id: a.id, entrance: a.entrance, tower_id: a.tower_id, number: a.number, floor: a.floor } : null); },
     async meStaff() { return delay(db.staff.find(s => s.user_id === uid()) || null); },
     async bootstrapOpen() { return delay(db.staff.length === 0); },
     async claimOwner() { fail('bootstrap_closed'); },
@@ -73,7 +73,10 @@
       const a = myApt(); if (!a && !isStaff()) fail('not_member');
       const id = db.seq++;
       const t = { ...p, id, ref: ref(id), status: 'new', assignee_id: null, vendor_id: null, source: isStaff() ? 'staff' : 'resident', created_at: now(), updated_at: now(), resolved_at: null, closed_at: null };
-      if (!isStaff()) { t.apartment_id = a.id; if (p.location === 'apartment') { t.tower_id = a.tower_id; t.floor = a.floor; } }
+      if (!isStaff()) { t.apartment_id = a.id; if (p.location === 'apartment') { t.entrance = a.entrance; t.floor = a.floor; t.area = 'apartment'; } }
+      const towerOf = { 1: 1, 2: 1, 3: 2, 4: 3, 5: 3, 6: 4 };
+      if (['parking_1', 'parking_2'].includes(t.area) || ['robotic_parking', 'parking_gate'].includes(t.category)) { t.entrance = null; t.location = 'common'; t.area = t.area && t.area !== 'apartment' ? t.area : (t.category === 'robotic_parking' ? 'parking_1' : 'parking_2'); }
+      t.tower_id = towerOf[t.entrance] || null;
       db.tickets.push(t); ev(id, 'created', { to_value: 'new', actor_kind: isStaff() ? 'staff' : 'resident' });
       for (const f of files) { const path = `${id}/${db.seq++}.jpg`; db.photos.push({ id: db.seq++, ticket_id: id, path, created_at: now(), _name: f.name }); ev(id, 'photo', { to_value: path }); }
       save(db); return delay({ ticket: t, photoErrors: 0 });
@@ -118,7 +121,7 @@
     async staff() { db = load(); return delay(db.staff); },
     async updateStaff(id, p) { db = load(); Object.assign(db.staff.find(s => s.user_id === id), p); save(db); return delay(); },
     async apartments() { db = load(); return delay(db.apartments); },
-    async addApartments(rows) { db = load(); for (const r of rows) { if (db.apartments.some(a => a.tower_id === r.tower_id && a.number === r.number)) continue; db.apartments.push({ ...r, id: db.seq++, active: true, user_id: null, pin_set_at: null }); } save(db); return delay(rows); },
+    async addApartments(rows) { db = load(); const towerOf = { 1: 1, 2: 1, 3: 2, 4: 3, 5: 3, 6: 4 }; for (const r of rows) { if (db.apartments.some(a => a.entrance === r.entrance && a.number === r.number)) continue; db.apartments.push({ ...r, tower_id: towerOf[r.entrance], id: db.seq++, active: true, user_id: null, pin_set_at: null }); } save(db); return delay(rows); },
     async updateApartment(id, p) { db = load(); Object.assign(db.apartments.find(a => a.id === id), p); save(db); return delay(); },
     async updateTower(id, p) { db = load(); Object.assign(db.towers.find(a => a.id === id), p); save(db); return delay(); },
     async vendors() { db = load(); return delay(db.vendors); },
@@ -127,7 +130,7 @@
     async saveIntervention(iv) { db = load(); if (iv.id) Object.assign(db.interventions.find(x => x.id === iv.id), iv); else { db.interventions.push({ ...iv, id: db.seq++, created_at: now() }); ev(iv.ticket_id, 'intervention', { to_value: iv.status, is_public: false, body: db.vendors.find(v => v.id === iv.vendor_id)?.name }); } save(db); return delay(); },
     async adminCall(action, p) {
       db = load();
-      if (action === 'apartment_set_pin') { const a = db.apartments.find(x => x.id === p.apartment_id); const pin = '' + (100000 + Math.floor(Math.random() * 899999)); const k = `apt-${a.tower_id}-${a.number}`; db.users[k] = { id: a.user_id || 'u-' + db.seq++, pin, kind: 'apartment' }; a.user_id = db.users[k].id; a.pin_set_at = now(); save(db); return delay({ pin, tower_id: a.tower_id, number: a.number }); }
+      if (action === 'apartment_set_pin') { const a = db.apartments.find(x => x.id === p.apartment_id); const pin = '' + (100000 + Math.floor(Math.random() * 899999)); const k = `apt-e${a.entrance}-${a.number}`; db.users[k] = { id: a.user_id || 'u-' + db.seq++, pin, kind: 'apartment' }; a.user_id = db.users[k].id; a.pin_set_at = now(); save(db); return delay({ pin, entrance: a.entrance, tower_id: a.tower_id, number: a.number }); }
       if (action === 'apartment_disable') { const a = db.apartments.find(x => x.id === p.apartment_id); a.pin_set_at = null; save(db); return delay({ ok: true }); }
       if (action === 'staff_create') { const id = 'u-' + db.seq++; db.users[p.email] = { id, pin: 'Temp-' + id, kind: 'staff' }; db.staff.push({ user_id: id, full_name: p.full_name, role: p.role, active: true, created_at: now() }); save(db); return delay({ email: p.email, temporary_password: 'Temp-' + id }); }
       fail('unknown_action');

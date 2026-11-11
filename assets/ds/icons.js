@@ -60,6 +60,16 @@ const P = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   'eye-slash': '<path d="M3 3l18 18"/>',
   restore: '<path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.5"/><path d="M4 4v4.5h4.5"/>',
+  robot: '<rect x="4" y="9" width="16" height="9" rx="2"/><path d="M8 18v2M16 18v2M12 9V5M9.5 5h5"/><circle cx="9" cy="13.5" r="1.2"/><circle cx="15" cy="13.5" r="1.2"/>',
+  gate: '<path d="M4 21V6M4 9h16l-2 3H4"/><path d="M8 9l-1.5 3M12 9l-1.5 3M16 9l-1.5 3"/><path d="M2 21h5"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/><path d="M3 7.5a9 9 0 0 1 2.5-4M21 7.5a9 9 0 0 0-2.5-4"/>',
+  odor: '<path d="M6 20c-1.5-2 1.5-4 0-6s1.5-4 0-6M12 20c-1.5-2 1.5-4 0-6s1.5-4 0-6M18 20c-1.5-2 1.5-4 0-6s1.5-4 0-6"/>',
+  hammer: '<path d="m13 7 4-4 4 4-4 4z"/><path d="m15 9-9.5 9.5a1.8 1.8 0 0 0 2.5 2.5L17.5 11.5"/><path d="M11 5.5 13 7"/>',
+  hand: '<path d="M7 12V6.5a1.5 1.5 0 0 1 3 0V11M10 10V4.5a1.5 1.5 0 0 1 3 0V11M13 10.5V6a1.5 1.5 0 0 1 3 0v6"/><path d="M16 9.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-2.7L3.5 15a1.6 1.6 0 0 1 2.6-1.9L7 14"/>',
+  stairs: '<path d="M3 20h5v-4h4v-4h4V8h5"/><path d="M3 20V16"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/>',
+  roof: '<path d="M2 12 12 4l10 8"/><path d="M5 10v10h14V10"/>',
+  smartphone: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
   message: '<path d="M4 5h16v11H9l-5 4z"/>',
 };
 

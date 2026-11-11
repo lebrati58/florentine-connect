@@ -25,8 +25,8 @@ function cors(origin: string | null) {
   };
 }
 
-export function apartmentEmail(towerId: number, number: string) {
-  return `apt-${towerId}-${number.toLowerCase()}@${APARTMENT_EMAIL_DOMAIN}`;
+export function apartmentEmail(entrance: number, number: string) {
+  return `apt-e${entrance}-${number.toLowerCase()}@${APARTMENT_EMAIL_DOMAIN}`;
 }
 
 const WEAK = new Set(["123456", "654321", "111111", "000000", "121212", "123123", "112233"]);
@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
       case "apartment_set_pin": {
         if (!isManager) return reply(403, { error: "forbidden" });
         const id = Number(body.apartment_id);
-        const { data: apt } = await admin.from("apartments").select("id, tower_id, number, user_id, active").eq("id", id).maybeSingle();
+        const { data: apt } = await admin.from("apartments").select("id, entrance, tower_id, number, user_id, active").eq("id", id).maybeSingle();
         if (!apt) return reply(404, { error: "apartment_not_found" });
         if (!apt.active) return reply(409, { error: "apartment_inactive" });
         const pin = generatePin();
@@ -77,10 +77,10 @@ Deno.serve(async (req) => {
           await admin.rpc("revoke_user_sessions", { p_user: userId });
         } else {
           const { data, error } = await admin.auth.admin.createUser({
-            email: apartmentEmail(apt.tower_id, apt.number),
+            email: apartmentEmail(apt.entrance, apt.number),
             password: pin,
             email_confirm: true,
-            app_metadata: { kind: "apartment", apartment_id: apt.id },
+            app_metadata: { kind: "apartment", apartment_id: apt.id, entrance: apt.entrance },
           });
           if (error) throw error;
           userId = data.user.id;
@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
           .update({ user_id: userId, pin_set_at: new Date().toISOString() }).eq("id", apt.id);
         if (upErr) throw upErr;
         // Le PIN n'est renvoyé qu'une seule fois et n'est stocké nulle part en clair.
-        return reply(200, { pin, tower_id: apt.tower_id, number: apt.number });
+        return reply(200, { pin, entrance: apt.entrance, tower_id: apt.tower_id, number: apt.number });
       }
 
       case "apartment_disable": {

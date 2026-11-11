@@ -3,8 +3,8 @@
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 
-const migration = readFileSync(process.argv[2], 'utf8');
-const rollback = process.argv[3] ? readFileSync(process.argv[3], 'utf8') : null;
+const migration = process.argv[2].split(',').map(f => readFileSync(f, 'utf8')).join('\n');
+const rollback = process.argv[3] ? process.argv[3].split(',').map(f => readFileSync(f, 'utf8')).join('\n') : null;
 const db = new PGlite();
 let pass = 0, fail = 0;
 const ok = (cond, msg) => { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗', msg); } };
@@ -62,11 +62,15 @@ ok(!(await as('owner', `insert into public.staff(user_id,full_name,role) values 
 ok(!!(await as('tech', `insert into public.staff(user_id,full_name,role) values ($1,'X','owner')`, [U.X])).error, 'technicien ne peut pas créer de compte équipe');
 
 console.log('\n— Appartements');
-ok(!(await as('owner', `insert into public.apartments(tower_id,number,floor) values (1,'12',3),(2,'30',7),(1,'14',3)`)).error, 'propriétaire crée des appartements');
-ok(!!(await as('tech', `insert into public.apartments(tower_id,number) values (3,'1')`)).error, 'technicien ne crée pas d’appartement');
-await db.exec(`update public.apartments set user_id='${U.A}' where tower_id=1 and number='12';
-               update public.apartments set user_id='${U.B}' where tower_id=2 and number='30';
-               update public.apartments set user_id='${U.C}' where tower_id=1 and number='14';`);
+ok(!(await as('owner', `insert into public.apartments(entrance,number,floor) values (1,'12',3),(3,'30',7),(2,'14',3)`)).error, 'propriétaire crée des appartements');
+ok(!!(await as('tech', `insert into public.apartments(entrance,number) values (4,'1')`)).error, 'technicien ne crée pas d’appartement');
+await db.exec(`update public.apartments set user_id='${U.A}' where entrance=1 and number='12';
+               update public.apartments set user_id='${U.B}' where entrance=3 and number='30';
+               update public.apartments set user_id='${U.C}' where entrance=2 and number='14';`);
+ok((await db.query(`select tower_id from public.apartments where entrance=3`)).rows[0].tower_id === 2, 'entrée 3 → tour 2 (déduite)');
+ok((await db.query(`select tower_id from public.apartments where entrance=2`)).rows[0].tower_id === 1, 'entrée 2 → tour 1 (déduite)');
+ok(!(await as('owner', `insert into public.apartments(entrance,number) values (2,'12')`)).error, 'même numéro autorisé dans une autre entrée');
+ok(!!(await as('owner', `insert into public.apartments(entrance,number) values (1,'12')`)).error, 'doublon entrée + numéro refusé');
 ok((await as('A', 'select * from public.apartments')).rows.length === 1, 'résident ne voit que son appartement');
 ok(!!(await as('A', `update public.apartments set user_id=$1`, [U.B])).error, 'résident ne peut pas réassigner un compte');
 ok((await as('X', 'select * from public.apartments')).rows.length === 0, 'compte non membre : aucun appartement');
@@ -77,7 +81,7 @@ const ins = await as('A', `insert into public.tickets(tower_id,location,category
 ok(!ins.error, 'résident crée un ticket ' + (ins.error || ''));
 const t = ins.rows?.[0] || {};
 ok(t.status === 'new' && t.assignee_id === null, 'statut/responsable imposés côté serveur');
-ok(t.tower_id === 1 && t.floor === 3, 'tour et étage forcés depuis l’appartement');
+ok(t.tower_id === 1 && t.entrance === 1 && t.floor === 3 && t.area === 'apartment', 'entrée, tour, étage et zone forcés depuis l’appartement');
 ok(t.ref === 'FL-' + String(t.id).padStart(5, '0'), 'référence générée ' + t.ref);
 ok((await as('B', 'select * from public.tickets')).rows.length === 0, 'autre appartement : ticket invisible');
 ok((await as('X', 'select * from public.tickets')).rows.length === 0, 'non-membre : ticket invisible');
@@ -97,8 +101,17 @@ ok(!!(await as('B', `insert into public.ticket_events(ticket_id,kind,body) value
 ok(!(await as('tech', `insert into public.ticket_events(ticket_id,kind,body) values ($1,'note','Pièce commandée')`, [t.id])).error, 'équipe ajoute une note interne');
 ok(!(await as('A', `select 1 from public.ticket_events where kind='note'`)).rows.length, 'note interne invisible pour le résident');
 ok(/cannot_cancel/.test((await as('A', 'select public.resident_cancel_ticket($1)', [t.id])).error || ''), 'annulation impossible une fois pris en charge');
-const t2 = (await as('A', `insert into public.tickets(tower_id,location,category,title) values (3,'common','elevator','Ascenseur bloqué') returning *`)).rows[0];
-ok(t2.tower_id === 3 && t2.apartment_id !== null, 'parties communes : tour choisie, déclarant suivi');
+const t2 = (await as('A', `insert into public.tickets(entrance,location,area,category,title) values (4,'common','lobby','alarm','Alarme du lobby') returning *`)).rows[0];
+ok(t2.tower_id === 3 && t2.entrance === 4 && t2.apartment_id !== null, 'lobby entrée 4 : tour 3 déduite, déclarant suivi');
+const tp = (await as('A', `insert into public.tickets(entrance,location,category,title) values (2,'apartment','robotic_parking','Parking robot en panne') returning *`)).rows[0];
+ok(tp && tp.area === 'parking_1' && tp.entrance === null && tp.tower_id === null && tp.location === 'common', 'parking robotisé → zone -1, commun au complexe');
+const tg = (await as('A', `insert into public.tickets(location,area,category,title) values ('common','parking_2','plumbing','Fuite parking -2') returning *`)).rows[0];
+ok(tg && tg.area === 'parking_2' && tg.tower_id === null, 'fuite au parking -2 acceptée sans tour');
+for (const c of ['parking_gate','odor','noise_works','beggars']) {
+  const r = await as('A', `insert into public.tickets(location,area,category,title) values ('common','other',$1,'Test catégorie') returning id`, [c]);
+  ok(!r.error, 'nouvelle catégorie acceptée : ' + c);
+}
+ok(!!(await as('A', `insert into public.tickets(location,area,category,title) values ('common','nowhere','other','Zone inconnue')`)).error, 'zone inconnue refusée');
 ok(!(await as('A', 'select public.resident_cancel_ticket($1)', [t2.id])).error, 'résident annule un ticket encore nouveau');
 await as('tech', `update public.tickets set status='resolved' where id=$1`, [t.id]);
 ok((await as('A', 'select resolved_at from public.tickets where id=$1', [t.id])).rows[0].resolved_at, 'date de résolution horodatée');
@@ -115,6 +128,9 @@ await as('owner', `insert into public.announcements(title,body,tower_id) values 
 await as('owner', `insert into public.announcements(title,body,published) values ('Brouillon','Non publié',false)`);
 ok((await as('A', 'select * from public.announcements')).rows.length === 0, 'annonce tour 2 / brouillon invisibles pour la tour 1');
 ok((await as('B', 'select * from public.announcements')).rows.length === 1, 'annonce visible pour la tour 2');
+await as('owner', `insert into public.announcements(title,body,entrance) values ('Lobby entrée 2','Peinture',2)`);
+ok((await as('C', `select * from public.announcements where entrance=2`)).rows.length === 1, 'annonce ciblée entrée 2 : visible entrée 2');
+ok((await as('A', `select * from public.announcements where entrance=2`)).rows.length === 0, 'annonce ciblée entrée 2 : invisible entrée 1');
 ok(!!(await as('A', `insert into public.announcements(title,body) values ('Pub','spam')`)).error, 'résident ne publie pas d’annonce');
 
 console.log('\n— Annuaire collaboratif');

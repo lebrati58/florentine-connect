@@ -3,6 +3,7 @@ import { icon } from '../assets/ds/icons.js';
 import { CONFIG } from '../assets/js/config.js';
 import {
   CATEGORIES, STATUSES, PRIORITIES, TRADES, OPEN_STATUSES, label, iconOf,
+  AREAS, COMMON_AREAS, ENTRANCES, CATEGORY_AREA, isParking, towerOfEntrance, entrancesOfTower,
   esc, $, $$, fmtDate, fmtDateTime, relTime, toast, errorKey, createApi,
 } from '../assets/js/core.js';
 
@@ -29,7 +30,7 @@ const C = {
   data: { tickets: null, staff: [], apartments: [], towers: [], vendors: [], interventions: [], announcements: [], directory: [], reports: [], legacy: null },
   errors: {}, lastSync: null, live: false,
   page: 'dashboard', view: 'table', drawer: null, drawerData: null, photoUrls: {},
-  f: { status: 'open', priority: '', tower: '', category: '', assignee: '', q: '' },
+  f: { status: 'open', priority: '', place: '', area: '', category: '', assignee: '', q: '' },
   aptTower: '', aptQ: '', dirQ: '', dirStatus: '',
 };
 let api, unsub;
@@ -79,7 +80,13 @@ async function refreshDrawer() {
 }
 const staffName = (id) => C.data.staff.find(s => s.user_id === id)?.full_name;
 const aptOf = (id) => C.data.apartments.find(a => a.id === id);
-const aptLabel = (a) => a ? `בניין ${a.tower_id} · דירה ${a.number}` : '—';
+const aptLabel = (a) => a ? `כניסה ${a.entrance} · דירה ${a.number}` : '—';
+const placeLabel = (t) => {
+  const area = t.area && t.area !== 'apartment' ? he(AREAS, t.area) : t.location === 'common' ? 'שטח משותף' : 'בתוך הדירה';
+  return isParking(t.area) ? area : `${t.entrance ? `כניסה ${t.entrance} · ` : ''}${area}`;
+};
+const placeKey = (t) => isParking(t.area) ? 'parking' : t.entrance ? 'e' + t.entrance : '';
+const VISIBLE_CATS = CATEGORIES.filter(c => !c.hidden);
 
 /* ------------------------------------------------------------------ authentification */
 function viewAuth() {
@@ -108,7 +115,7 @@ function viewAuth() {
         <button class="btn btn-gold btn-block" type="submit" ${C.authBusy ? 'disabled aria-busy="true"' : ''}>${C.authBusy ? '<span class="spinner"></span>' : icon('lock', 'ic-sm')}${boot ? 'יצירת חשבון' : 'כניסה'}</button>
       </form>
       ${C.bootstrap ? `<button class="btn btn-ghost btn-block" style="margin-top:10px" data-act="auth-mode">${boot ? 'יש לי כבר חשבון' : 'הגדרה ראשונית של המערכת'}</button>` : ''}
-      <p class="hint" style="margin-top:22px">חשבונות הדיירים (בניין + דירה + קוד) אינם מעניקים גישה למערכת זו.</p>`}
+      <p class="hint" style="margin-top:22px">חשבונות הדיירים (כניסה + דירה + קוד) אינם מעניקים גישה למערכת זו.</p>`}
     </div></section>
   </div>`;
 }
@@ -227,11 +234,20 @@ function pageDashboard() {
     </div>
     <div class="stack">
       <section class="card"><div class="card-h"><h2>${icon('filter')}לפי סטטוס</h2></div><div class="card-b">${hbars(STATUSES.filter(s => s.key !== 'cancelled').map(s => [he(STATUSES, s.key), T.filter(t => t.status === s.key).length, `var(--st-${s.key === 'in_progress' ? 'progress' : s.key})`]))}</div></section>
-      <section class="card"><div class="card-h"><h2>${icon('towers')}פניות פתוחות לפי בניין</h2></div><div class="card-b">${hbars([1, 2, 3, 4].map(n => [`בניין ${n}`, open.filter(t => t.tower_id === n).length, 'var(--night-700)']))}</div></section>
+      <section class="card"><div class="card-h"><h2>${icon('towers')}פניות פתוחות לפי כניסה</h2></div><div class="card-b">${hbars([...ENTRANCES.map(e => [`כניסה ${e.id}`, open.filter(t => t.entrance === e.id).length, 'var(--night-700)']), ['חניונים', open.filter(t => isParking(t.area)).length, 'var(--gold-600)']])}</div></section>
+      <section class="card"><div class="card-h"><h2>${icon('pin')}מוקדים חוזרים (90 יום)</h2></div><div class="card-b">${hotspots(T)}</div></section>
       <section class="card"><div class="card-h"><h2>${icon('wrench')}לפי קטגוריה</h2></div><div class="card-b">${T.length ? hbars(CATEGORIES.map(c => [c.he, T.filter(t => t.category === c.key).length, 'var(--gold-600)']).filter(x => x[1]).sort((a, b) => b[1] - a[1]).slice(0, 6)) : '<p class="muted" style="margin:0">אין נתונים.</p>'}</div></section>
     </div>
   </div>
   <p class="data-note">${icon('info', 'ic-sm')}כל הנתונים נטענים ישירות ממסד הנתונים של המתחם. לא מוצגים נתוני דוגמה.</p>`;
+}
+function hotspots(T) {
+  const since = Date.now() - 90 * 864e5, counts = {};
+  T.filter(t => new Date(t.created_at) > since && t.area && t.area !== 'apartment').forEach(t => {
+    const k = `${placeLabel(t)} — ${he(CATEGORIES, t.category)}`; counts[k] = (counts[k] || 0) + 1;
+  });
+  const rows = Object.entries(counts).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  return rows.length ? hbars(rows.map(([k, n]) => [k, n, 'var(--pr-high)'])) : '<p class="muted" style="margin:0">אין עדיין תקלות שחוזרות באותו מקום.</p>';
 }
 function attention(open) {
   const list = [...open].sort((a, b) => (a.priority === 'urgent' ? -1 : 0) - (b.priority === 'urgent' ? -1 : 0) || (a.assignee_id ? 1 : 0) - (b.assignee_id ? 1 : 0) || new Date(a.created_at) - new Date(b.created_at)).slice(0, 6);
@@ -265,7 +281,8 @@ function filteredTickets() {
   const f = C.f, q = f.q.trim().toLowerCase();
   return (C.data.tickets || []).filter(t =>
     (f.status === 'all' || (f.status === 'open' ? OPEN_STATUSES.includes(t.status) : t.status === f.status))
-    && (!f.priority || t.priority === f.priority) && (!f.tower || t.tower_id === Number(f.tower))
+    && (!f.priority || t.priority === f.priority) && (!f.place || placeKey(t) === f.place)
+    && (!f.area || (t.area || (t.location === 'common' ? '' : 'apartment')) === f.area)
     && (!f.category || t.category === f.category)
     && (!f.assignee || (f.assignee === 'none' ? !t.assignee_id : t.assignee_id === f.assignee))
     && (!q || [t.ref, t.title, t.description, t.location_detail, aptOf(t.apartment_id)?.number].some(v => String(v || '').toLowerCase().includes(q))));
@@ -274,8 +291,8 @@ function ticketRow(t) {
   const a = aptOf(t.apartment_id);
   return `<tr class="clickable ${C.drawer === t.id ? 'sel' : ''}" data-act="open-ticket" data-id="${t.id}">
     <td><span class="ref">${esc(t.ref)}</span></td>
-    <td><div class="ttl">${esc(t.title)}</div><div class="sub">${he(CATEGORIES, t.category)} · ${t.location === 'common' ? 'שטח משותף' : 'בדירה'}${t.location_detail ? ' · ' + esc(t.location_detail) : ''}</div></td>
-    <td data-hide-m>בניין ${t.tower_id}${t.floor != null ? `<div class="sub">קומה ${t.floor}</div>` : ''}</td>
+    <td><div class="ttl">${esc(t.title)}</div><div class="sub">${he(CATEGORIES, t.category)}${t.location_detail ? ' · ' + esc(t.location_detail) : ''}</div></td>
+    <td data-hide-m>${esc(placeLabel(t))}${t.floor != null ? `<div class="sub">קומה ${t.floor}</div>` : ''}</td>
     <td data-hide-m>${a ? `דירה ${esc(a.number)}` : '<span class="muted">—</span>'}</td>
     <td><span class="badge pr-${t.priority}">${he(PRIORITIES, t.priority)}</span></td>
     <td><span class="badge st-${t.status}">${he(STATUSES, t.status)}</span></td>
@@ -298,13 +315,14 @@ function pageTickets() {
     <div class="toolbar">
       <div class="search-in">${icon('search')}<input class="input" id="tq" type="search" placeholder="מספר פנייה, כותרת, דירה…" value="${esc(C.f.q)}" aria-label="חיפוש פניות"></div>
       <select class="select" data-f="priority" aria-label="דחיפות"><option value="">כל הדחיפויות</option>${PRIORITIES.map(p => `<option value="${p.key}" ${C.f.priority === p.key ? 'selected' : ''}>${p.he}</option>`).join('')}</select>
-      <select class="select" data-f="tower" aria-label="בניין"><option value="">כל הבניינים</option>${[1, 2, 3, 4].map(n => `<option value="${n}" ${String(C.f.tower) === String(n) ? 'selected' : ''}>בניין ${n}</option>`).join('')}</select>
-      <select class="select" data-f="category" aria-label="קטגוריה"><option value="">כל הקטגוריות</option>${CATEGORIES.map(c => `<option value="${c.key}" ${C.f.category === c.key ? 'selected' : ''}>${c.he}</option>`).join('')}</select>
+      <select class="select" data-f="place" aria-label="כניסה"><option value="">כל הכניסות</option>${ENTRANCES.map(e => `<option value="e${e.id}" ${C.f.place === 'e' + e.id ? 'selected' : ''}>כניסה ${e.id}</option>`).join('')}<option value="parking" ${C.f.place === 'parking' ? 'selected' : ''}>חניונים</option></select>
+      <select class="select" data-f="area" aria-label="אזור"><option value="">כל האזורים</option>${AREAS.map(a => `<option value="${a.key}" ${C.f.area === a.key ? 'selected' : ''}>${a.he}</option>`).join('')}</select>
+      <select class="select" data-f="category" aria-label="קטגוריה"><option value="">כל הקטגוריות</option>${VISIBLE_CATS.map(c => `<option value="${c.key}" ${C.f.category === c.key ? 'selected' : ''}>${c.he}</option>`).join('')}</select>
       <select class="select" data-f="assignee" aria-label="אחראי"><option value="">כל האחראים</option><option value="none" ${C.f.assignee === 'none' ? 'selected' : ''}>לא שובץ</option>${C.data.staff.map(s => `<option value="${s.user_id}" ${C.f.assignee === s.user_id ? 'selected' : ''}>${esc(s.full_name)}</option>`).join('')}</select>
       <span class="spacer"></span><span class="muted">${list.length} תוצאות</span>
-      ${(C.f.priority || C.f.tower || C.f.category || C.f.assignee || C.f.q) ? `<button class="btn btn-ghost btn-sm" data-act="f-clear">${icon('x', 'ic-sm')}ניקוי</button>` : ''}
+      ${(C.f.priority || C.f.place || C.f.area || C.f.category || C.f.assignee || C.f.q) ? `<button class="btn btn-ghost btn-sm" data-act="f-clear">${icon('x', 'ic-sm')}ניקוי</button>` : ''}
     </div>
-    ${C.view === 'kanban' ? kanban(list) : list.length ? `<div class="tbl-wrap"><table class="tbl responsive"><thead><tr><th>מס׳</th><th>פנייה</th><th data-hide-m>בניין</th><th data-hide-m>דירה</th><th>דחיפות</th><th>סטטוס</th><th data-hide-m>אחראי</th><th data-hide-m>נפתחה</th></tr></thead><tbody>${list.map(ticketRow).join('')}</tbody></table></div>`
+    ${C.view === 'kanban' ? kanban(list) : list.length ? `<div class="tbl-wrap"><table class="tbl responsive"><thead><tr><th>מס׳</th><th>פנייה</th><th data-hide-m>מיקום</th><th data-hide-m>דירה מדווחת</th><th>דחיפות</th><th>סטטוס</th><th data-hide-m>אחראי</th><th data-hide-m>נפתחה</th></tr></thead><tbody>${list.map(ticketRow).join('')}</tbody></table></div>`
       : `<div class="card-b">${empty('inbox', all.length ? 'אין פניות התואמות לסינון' : 'עדיין אין פניות', all.length ? 'שנו את הסינון או נקו אותו.' : 'פניות שהדיירים שולחים מהאפליקציה יופיעו כאן בזמן אמת.')}</div>`}
   </section>`;
 }
@@ -316,7 +334,7 @@ function kanban(list) {
       <div class="kcol-b">${items.map(t => `<article class="kcard ${t.priority === 'urgent' ? 'urgent' : ''}" draggable="${can.edit()}" data-drag="${t.id}" data-act="open-ticket" data-id="${t.id}" tabindex="0">
         <div class="row"><span class="ref">${esc(t.ref)}</span><span class="badge pr-${t.priority}">${he(PRIORITIES, t.priority)}</span></div>
         <div class="ttl">${esc(t.title)}</div>
-        <div class="row"><span>${icon(iconOf(CATEGORIES, t.category), 'ic-sm')}</span><span>בניין ${t.tower_id}${aptOf(t.apartment_id) ? ' · דירה ' + esc(aptOf(t.apartment_id).number) : ''}</span><span>${t.assignee_id ? `<span class="mini-avatar"><i>${esc(initials(staffName(t.assignee_id)))}</i></span>` : ''}</span></div>
+        <div class="row"><span>${icon(iconOf(CATEGORIES, t.category), 'ic-sm')}</span><span>${esc(placeLabel(t))}</span><span>${t.assignee_id ? `<span class="mini-avatar"><i>${esc(initials(staffName(t.assignee_id)))}</i></span>` : ''}</span></div>
       </article>`).join('') || '<p class="muted" style="text-align:center;font-size:12px;padding:16px 0">אין פניות</p>'}</div></div>`;
   }).join('')}</div>`;
 }
@@ -346,12 +364,14 @@ function renderDrawer() {
         <div class="field"><label for="dAss">אחראי</label><select class="select" id="dAss" data-upd="assignee_id" ${ro}><option value="">לא שובץ</option>${C.data.staff.filter(s => s.active && s.role !== 'viewer').map(s => `<option value="${s.user_id}" ${t.assignee_id === s.user_id ? 'selected' : ''}>${esc(s.full_name)}</option>`).join('')}</select></div>
         <div class="field"><label for="dVen">ספק</label><select class="select" id="dVen" data-upd="vendor_id" ${ro}><option value="">ללא ספק</option>${C.data.vendors.filter(v => v.active || v.id === t.vendor_id).map(v => `<option value="${v.id}" ${t.vendor_id === v.id ? 'selected' : ''}>${esc(v.name)} · ${esc(v.trade)}</option>`).join('')}</select></div>
         <div class="field"><label for="dDue">יעד לטיפול</label><input class="input" type="date" id="dDue" data-upd="due_at" value="${t.due_at ? t.due_at.slice(0, 10) : ''}" ${ro}></div>
-        <div class="field"><label for="dCat">קטגוריה</label><select class="select" id="dCat" data-upd="category" ${ro}>${CATEGORIES.map(c => `<option value="${c.key}" ${t.category === c.key ? 'selected' : ''}>${c.he}</option>`).join('')}</select></div>
+        <div class="field"><label for="dCat">קטגוריה</label><select class="select" id="dCat" data-upd="category" ${ro}>${CATEGORIES.filter(c => !c.hidden || c.key === t.category).map(c => `<option value="${c.key}" ${t.category === c.key ? 'selected' : ''}>${c.he}</option>`).join('')}</select></div>
+        <div class="field"><label for="dArea">אזור</label><select class="select" id="dArea" data-upd="area" ${ro}>${AREAS.map(a => `<option value="${a.key}" ${(t.area || '') === a.key ? 'selected' : ''}>${a.he}</option>`).join('')}</select></div>
+        <div class="field"><label for="dEnt">כניסה</label><select class="select" id="dEnt" data-upd="entrance" ${ro}><option value="">— (חניון / כללי)</option>${ENTRANCES.map(e => `<option value="${e.id}" ${t.entrance === e.id ? 'selected' : ''}>כניסה ${e.id} · בניין ${e.tower}</option>`).join('')}</select></div>
       </div>
       <dl class="kv">
-        <div><dt>בניין / קומה</dt><dd>בניין ${t.tower_id}${t.floor != null ? ` · קומה ${t.floor}` : ''}</dd></div>
-        <div><dt>דירה מדווחת</dt><dd>${a ? `דירה ${esc(a.number)}${a.label ? ` · ${esc(a.label)}` : ''}` : '—'}</dd></div>
-        <div><dt>מיקום</dt><dd>${t.location === 'common' ? 'שטח משותף' : 'בתוך הדירה'}</dd></div>
+        <div><dt>מיקום</dt><dd>${esc(placeLabel(t))}${t.floor != null ? ` · קומה ${t.floor}` : ''}</dd></div>
+        <div><dt>בניין</dt><dd>${t.tower_id ? `בניין ${t.tower_id}` : 'משותף לכל המתחם'}</dd></div>
+        <div><dt>דירה מדווחת</dt><dd>${a ? `${esc(aptLabel(a))}${a.label ? ` · ${esc(a.label)}` : ''}` : '—'}</dd></div>
         <div><dt>נפתחה</dt><dd>${esc(fmtDateTime(t.created_at, 'he'))}</dd></div>
         <div><dt>עודכנה</dt><dd>${esc(relTime(t.updated_at, 'he'))}</dd></div>
         <div><dt>טופלה</dt><dd>${t.resolved_at ? esc(fmtDateTime(t.resolved_at, 'he')) : '—'}</dd></div>
@@ -398,7 +418,7 @@ function eventRow(e) {
 function bindDrawer(dr) {
   $$('[data-upd]', dr).forEach(el => el.addEventListener('change', async () => {
     const k = el.dataset.upd; let v = el.value || null;
-    if (k === 'vendor_id' && v) v = Number(v);
+    if ((k === 'vendor_id' || k === 'entrance') && v) v = Number(v);
     if (k === 'due_at' && v) v = new Date(v + 'T12:00:00').toISOString();
     try { await api.updateTicket(C.drawer, { [k]: v }); toast('השינוי נשמר'); C.data.tickets = await api.tickets({ limit: 2000 }); await refreshDrawer(); render(); }
     catch (e) { toast(errMsg(e), 'error'); refreshDrawer(); }
@@ -441,24 +461,24 @@ function pageVendors() {
 function pageBuildings() {
   const A = C.data.apartments, T = C.data.tickets || [];
   const q = C.aptQ.trim().toLowerCase();
-  const list = A.filter(a => (!C.aptTower || a.tower_id === Number(C.aptTower)) && (!q || String(a.number).includes(q) || (a.label || '').toLowerCase().includes(q)));
+  const list = A.filter(a => (!C.aptTower || a.entrance === Number(C.aptTower)) && (!q || String(a.number).includes(q) || (a.label || '').toLowerCase().includes(q)));
   return `${errBanner('apartments')}
-  <div class="page-title"><div><h1>בניינים ודירות</h1><p>ניהול ארבעת הבניינים, הדירות וקודי הכניסה של הדיירים.</p></div>${can.manage() ? `<button class="btn btn-gold" data-act="apt-bulk">${icon('plus', 'ic-sm')}הוספת דירות</button>` : ''}</div>
+  <div class="page-title"><div><h1>בניינים ודירות</h1><p>ארבעה בניינים, שש כניסות: 1-2, 3, 4-5, 6. ניהול הדירות וקודי הכניסה של הדיירים.</p></div>${can.manage() ? `<button class="btn btn-gold" data-act="apt-bulk">${icon('plus', 'ic-sm')}הוספת דירות</button>` : ''}</div>
   <div class="towers">${[1, 2, 3, 4].map(n => { const tw = C.data.towers.find(x => x.id === n) || {}; const ta = A.filter(a => a.tower_id === n); return `<article class="tower">
-    <h3>בניין ${n}</h3><span style="color:#9FB0C7;font-size:12.5px">${tw.floors ? `${tw.floors} קומות` : 'מספר קומות לא הוגדר'}${tw.address ? ' · ' + esc(tw.address) : ''}</span>
+    <h3>בניין ${n}</h3><span style="color:var(--gold-300);font-size:13px;font-weight:600">${entrancesOfTower(n).length > 1 ? 'כניסות' : 'כניסה'} ${entrancesOfTower(n).join(' + ')}</span><span style="color:#9FB0C7;font-size:12.5px">${tw.floors ? `${tw.floors} קומות` : 'מספר קומות לא הוגדר'}${tw.address ? ' · ' + esc(tw.address) : ''}</span>
     <div class="stats"><div><b>${ta.length}</b><small>דירות</small></div><div><b>${ta.filter(a => a.pin_set_at).length}</b><small>מחוברות</small></div><div><b>${T.filter(t => t.tower_id === n && OPEN_STATUSES.includes(t.status)).length}</b><small>פניות פתוחות</small></div></div>
     ${can.manage() ? `<button class="btn btn-line btn-sm" data-act="tower-form" data-id="${n}">${icon('edit', 'ic-sm')}פרטי הבניין</button>` : ''}
   </article>`; }).join('')}</div>
   <section class="card">
     <div class="toolbar"><div class="search-in">${icon('search')}<input class="input" id="aq" type="search" placeholder="מספר דירה או שם משפחה" value="${esc(C.aptQ)}" aria-label="חיפוש דירה"></div>
-      <select class="select" id="aTower" aria-label="בניין"><option value="">כל הבניינים</option>${[1, 2, 3, 4].map(n => `<option value="${n}" ${String(C.aptTower) === String(n) ? 'selected' : ''}>בניין ${n}</option>`).join('')}</select>
+      <select class="select" id="aTower" aria-label="כניסה"><option value="">כל הכניסות</option>${ENTRANCES.map(e => `<option value="${e.id}" ${String(C.aptTower) === String(e.id) ? 'selected' : ''}>כניסה ${e.id} · בניין ${e.tower}</option>`).join('')}</select>
       <span class="spacer"></span><span class="muted">${list.length} דירות</span></div>
     ${list.length ? `<div class="tbl-wrap"><table class="tbl responsive"><thead><tr><th>דירה</th><th data-hide-m>קומה</th><th data-hide-m>משפחה / הערה</th><th>גישה לאפליקציה</th><th data-hide-m>פניות</th><th></th></tr></thead><tbody>
-      ${list.map(a => `<tr><td><div class="ttl">בניין ${a.tower_id} · דירה ${esc(a.number)}</div></td><td data-hide-m>${a.floor ?? '—'}</td><td data-hide-m>${esc(a.label || '—')}</td>
+      ${list.map(a => `<tr><td><div class="ttl">${esc(aptLabel(a))}</div><div class="sub">בניין ${a.tower_id}</div></td><td data-hide-m>${a.floor ?? '—'}</td><td data-hide-m>${esc(a.label || '—')}</td>
         <td>${!a.active ? '<span class="badge st-cancelled">מושבתת</span>' : a.pin_set_at ? `<span class="badge st-resolved">פעילה</span><div class="sub">קוד הונפק ${esc(relTime(a.pin_set_at, 'he'))}</div>` : '<span class="badge st-waiting">ללא קוד</span>'}</td>
         <td data-hide-m>${T.filter(t => t.apartment_id === a.id).length}</td>
         <td style="white-space:nowrap">${can.manage() ? `<button class="btn btn-night btn-sm" data-act="set-pin" data-id="${a.id}">${icon('key', 'ic-sm')}${a.pin_set_at ? 'קוד חדש' : 'הנפקת קוד'}</button> <button class="btn btn-ghost btn-sm" data-act="apt-form" data-id="${a.id}" aria-label="עריכה">${icon('edit', 'ic-sm')}</button>${a.pin_set_at ? ` <button class="btn btn-ghost btn-sm" data-act="apt-disable" data-id="${a.id}" title="ניתוק הגישה">${icon('lock', 'ic-sm')}</button>` : ''}` : ''}</td></tr>`).join('')}
-    </tbody></table></div>` : `<div class="card-b">${empty('home', A.length ? 'לא נמצאו דירות' : 'טרם הוגדרו דירות', A.length ? 'שנו את החיפוש.' : 'הוסיפו את 260 הדירות של ארבעת הבניינים (אפשר בטווחים), ולאחר מכן הנפיקו קוד לכל דירה.', can.manage() && !A.length ? `<button class="btn btn-night" data-act="apt-bulk">${icon('plus', 'ic-sm')}הוספת דירות</button>` : '')}</div>`}
+    </tbody></table></div>` : `<div class="card-b">${empty('home', A.length ? 'לא נמצאו דירות' : 'טרם הוגדרו דירות', A.length ? 'שנו את החיפוש.' : 'הוסיפו את הדירות לפי כניסה (אפשר בטווחים), ולאחר מכן הנפיקו קוד לכל דירה.', can.manage() && !A.length ? `<button class="btn btn-night" data-act="apt-bulk">${icon('plus', 'ic-sm')}הוספת דירות</button>` : '')}</div>`}
   </section>
   <p class="data-note">${icon('shield', 'ic-sm')}הקודים נוצרים בשרת, מוצגים פעם אחת בלבד ואינם נשמרים כטקסט גלוי. קוד חדש מנתק את כל החיבורים הקיימים של הדירה.</p>`;
 }
@@ -472,7 +492,7 @@ function pageAnnouncements() {
   <section class="card">${A.length ? A.map(a => {
     const expired = a.expires_at && new Date(a.expires_at) < new Date();
     return `<div class="notice-row"><div><h3>${a.pinned ? icon('pin', 'ic-sm') : ''} ${esc(a.title)}</h3><p>${esc(a.body)}</p>
-      <div class="meta"><span class="badge ${a.category === 'urgent' ? 'pr-urgent' : 'pr-normal'}">${ANN_CAT[a.category]}</span><span class="badge no-dot st-closed">${a.tower_id ? 'בניין ' + a.tower_id : 'כל הבניינים'}</span>
+      <div class="meta"><span class="badge ${a.category === 'urgent' ? 'pr-urgent' : 'pr-normal'}">${ANN_CAT[a.category]}</span><span class="badge no-dot st-closed">${a.entrance ? 'כניסה ' + a.entrance : a.tower_id ? 'בניין ' + a.tower_id : 'כל הבניינים'}</span>
       ${!a.published ? '<span class="badge st-waiting">טיוטה</span>' : expired ? '<span class="badge st-cancelled">פג תוקף</span>' : '<span class="badge st-resolved">מפורסמת</span>'}
       ${Object.keys(a.translations || {}).map(l => `<span class="badge no-dot st-new">${l.toUpperCase()}</span>`).join('')}
       <span class="muted" style="font-size:12px">${esc(fmtDateTime(a.starts_at, 'he'))}</span></div></div>
@@ -561,11 +581,11 @@ const formErr = (ov, m) => { const p = $('.form-error', ov); if (p) p.textConten
 function newTicketSheet() {
   sheet('פנייה חדשה (ע״י הצוות)', `<form id="ntForm">
     <div class="props" style="margin-bottom:14px">
-      <div class="field"><label for="ntTower">בניין</label><select class="select" id="ntTower" name="tower">${[1, 2, 3, 4].map(n => `<option value="${n}">בניין ${n}</option>`).join('')}</select></div>
-      <div class="field"><label for="ntLoc">מיקום</label><select class="select" id="ntLoc" name="location"><option value="common">שטח משותף</option><option value="apartment">בתוך דירה</option></select></div>
+      <div class="field"><label for="ntArea">אזור</label><select class="select" id="ntArea" name="area">${AREAS.map(a => `<option value="${a.key}" ${a.key === 'lobby' ? 'selected' : ''}>${a.he}</option>`).join('')}</select></div>
+      <div class="field"><label for="ntTower">כניסה</label><select class="select" id="ntTower" name="tower">${ENTRANCES.map(e => `<option value="${e.id}">כניסה ${e.id} · בניין ${e.tower}</option>`).join('')}</select></div>
       <div class="field"><label for="ntApt">דירה (לא חובה)</label><select class="select" id="ntApt" name="apt"><option value="">—</option></select></div>
       <div class="field"><label for="ntFloor">קומה</label><input class="input" id="ntFloor" name="floor" inputmode="numeric"></div>
-      <div class="field"><label for="ntCat">קטגוריה</label><select class="select" id="ntCat" name="category">${CATEGORIES.map(c => `<option value="${c.key}">${c.he}</option>`).join('')}</select></div>
+      <div class="field"><label for="ntCat">קטגוריה</label><select class="select" id="ntCat" name="category">${VISIBLE_CATS.map(c => `<option value="${c.key}">${c.he}</option>`).join('')}</select></div>
       <div class="field"><label for="ntPrio">דחיפות</label><select class="select" id="ntPrio" name="priority">${PRIORITIES.map(p => `<option value="${p.key}" ${p.key === 'normal' ? 'selected' : ''}>${p.he}</option>`).join('')}</select></div>
     </div>
     <div class="field"><label for="ntTitle">כותרת</label><input class="input" id="ntTitle" name="title" required minlength="3" maxlength="120"></div>
@@ -575,13 +595,15 @@ function newTicketSheet() {
     <p class="form-error" role="alert"></p>
     <button class="btn btn-gold btn-block" type="submit">${icon('plus', 'ic-sm')}יצירת הפנייה</button></form>`, (ov) => {
     const f = $('#ntForm', ov);
-    const fillApts = () => { f.apt.innerHTML = '<option value="">—</option>' + C.data.apartments.filter(a => a.tower_id === Number(f.tower.value)).map(a => `<option value="${a.id}">דירה ${esc(a.number)}</option>`).join(''); };
+    const fillApts = () => { f.apt.innerHTML = '<option value="">—</option>' + C.data.apartments.filter(a => a.entrance === Number(f.tower.value)).map(a => `<option value="${a.id}">דירה ${esc(a.number)}</option>`).join(''); };
+    const syncArea = () => { const fixed = CATEGORY_AREA[f.category.value]; if (fixed) f.area.value = fixed; f.tower.disabled = isParking(f.area.value); };
     f.tower.addEventListener('change', fillApts); fillApts();
+    f.category.addEventListener('change', syncArea); f.area.addEventListener('change', syncArea); syncArea();
     f.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (f.title.value.trim().length < 3) return formErr(ov, 'יש להזין כותרת (3 תווים לפחות).');
       try {
-        const { ticket } = await api.createTicket({ tower_id: Number(f.tower.value), location: f.location.value, apartment_id: f.apt.value ? Number(f.apt.value) : null, floor: f.floor.value !== '' && !isNaN(Number(f.floor.value)) ? Number(f.floor.value) : null, category: f.category.value, priority: f.priority.value, title: f.title.value.trim(), location_detail: f.detail.value.trim() || null, description: f.description.value.trim() || null, assignee_id: f.assignee.value || null });
+        const { ticket } = await api.createTicket({ entrance: isParking(f.area.value) ? null : Number(f.tower.value), area: f.area.value, location: f.area.value === 'apartment' ? 'apartment' : 'common', apartment_id: f.apt.value ? Number(f.apt.value) : null, floor: f.floor.value !== '' && !isNaN(Number(f.floor.value)) ? Number(f.floor.value) : null, category: f.category.value, priority: f.priority.value, title: f.title.value.trim(), location_detail: f.detail.value.trim() || null, description: f.description.value.trim() || null, assignee_id: f.assignee.value || null });
         toast(`הפנייה ${ticket.ref} נוצרה`); closeSheet(); C.data.tickets = await api.tickets({ limit: 2000 }); C.page = 'tickets'; location.hash = 'tickets'; render(); openTicket(ticket.id);
       } catch (x) { formErr(ov, errMsg(x)); }
     });
@@ -623,9 +645,9 @@ function interventionSheet() {
   });
 }
 function bulkAptSheet() {
-  sheet('הוספת דירות', `<form id="baForm"><p class="muted" style="margin-top:0">הוסיפו טווח של מספרי דירות לבניין. דירות קיימות לא ישוכפלו.</p>
+  sheet('הוספת דירות', `<form id="baForm"><p class="muted" style="margin-top:0">הוסיפו טווח של מספרי דירות לכניסה. דירות קיימות לא ישוכפלו.</p>
     <div class="props" style="margin-bottom:14px">
-      <div class="field"><label for="baT">בניין</label><select class="select" id="baT" name="tower">${[1, 2, 3, 4].map(n => `<option value="${n}">בניין ${n}</option>`).join('')}</select></div>
+      <div class="field"><label for="baT">כניסה</label><select class="select" id="baT" name="tower">${ENTRANCES.map(e => `<option value="${e.id}">כניסה ${e.id} · בניין ${e.tower}</option>`).join('')}</select></div>
       <div class="field"><label for="baF">קומה (לא חובה)</label><input class="input" id="baF" name="floor" inputmode="numeric"></div>
       <div class="field"><label for="baA">ממספר</label><input class="input" id="baA" name="from" inputmode="numeric" required></div>
       <div class="field"><label for="baB">עד מספר</label><input class="input" id="baB" name="to" inputmode="numeric" required></div>
@@ -633,8 +655,8 @@ function bulkAptSheet() {
     $('#baForm', ov).addEventListener('submit', async (e) => {
       e.preventDefault(); const f = e.target; const a = Number(f.from.value), b = Number(f.to.value), tw = Number(f.tower.value);
       if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < a || b - a > 120) return formErr(ov, 'טווח לא תקין (עד 120 דירות בכל פעם).');
-      const existing = new Set(C.data.apartments.filter(x => x.tower_id === tw).map(x => String(x.number)));
-      const rows = []; for (let n = a; n <= b; n++) if (!existing.has(String(n))) rows.push({ tower_id: tw, number: String(n), floor: f.floor.value !== '' ? Number(f.floor.value) : null });
+      const existing = new Set(C.data.apartments.filter(x => x.entrance === tw).map(x => String(x.number)));
+      const rows = []; for (let n = a; n <= b; n++) if (!existing.has(String(n))) rows.push({ entrance: tw, number: String(n), floor: f.floor.value !== '' ? Number(f.floor.value) : null });
       if (!rows.length) return formErr(ov, 'כל הדירות בטווח כבר קיימות.');
       try { await api.addApartments(rows); toast(`${rows.length} דירות נוספו`); closeSheet(); C.data.apartments = await api.apartments(); render(); }
       catch (x) { formErr(ov, errMsg(x)); }
@@ -643,7 +665,7 @@ function bulkAptSheet() {
 }
 function aptSheet(id) {
   const a = aptOf(id);
-  sheet(`בניין ${a.tower_id} · דירה ${esc(a.number)}`, `<form id="apForm">
+  sheet(esc(aptLabel(a)), `<form id="apForm">
     <div class="props" style="margin-bottom:14px"><div class="field"><label for="apF">קומה</label><input class="input" id="apF" name="floor" inputmode="numeric" value="${a.floor ?? ''}"></div>
     <div class="field"><label for="apL">משפחה / הערה פנימית</label><input class="input" id="apL" name="label" maxlength="80" value="${esc(a.label || '')}"></div></div>
     <label class="check" style="margin-bottom:14px"><input type="checkbox" name="active" ${a.active ? 'checked' : ''}><span>דירה פעילה</span></label>
@@ -670,12 +692,12 @@ function towerSheet(id) {
 }
 async function setPin(id) {
   const a = aptOf(id);
-  if (a.pin_set_at && !confirm(`להנפיק קוד חדש לבניין ${a.tower_id}, דירה ${a.number}? הקוד הקודם יבוטל וכל המכשירים המחוברים ינותקו.`)) return;
+  if (a.pin_set_at && !confirm(`להנפיק קוד חדש לכניסה ${a.entrance}, דירה ${a.number}? הקוד הקודם יבוטל וכל המכשירים המחוברים ינותקו.`)) return;
   const ov = sheet('קוד כניסה לדירה', '<div class="pin-reveal"><div class="spinner"></div></div>');
   try {
     const r = await api.adminCall('apartment_set_pin', { apartment_id: id });
-    const msg = `שלום, קוד הכניסה לאפליקציית 4FLORENTINE עבור בניין ${r.tower_id}, דירה ${r.number}: ${r.pin}\n${CONFIG.residentUrl}`;
-    $('.sheet-body', ov).innerHTML = `<div class="pin-reveal"><p class="muted" style="margin:0">בניין ${r.tower_id} · דירה ${esc(r.number)}</p><div class="pin">${esc(r.pin)}</div>
+    const msg = `שלום, קוד הכניסה לאפליקציית 4FLORENTINE עבור כניסה ${r.entrance}, דירה ${r.number}: ${r.pin}\n${CONFIG.residentUrl}`;
+    $('.sheet-body', ov).innerHTML = `<div class="pin-reveal"><p class="muted" style="margin:0">כניסה ${r.entrance} · דירה ${esc(r.number)}</p><div class="pin">${esc(r.pin)}</div>
       <div class="banner banner-warn">${icon('alert', 'ic-sm')}<span>הקוד מוצג פעם אחת בלבד ואינו נשמר. מסרו אותו לדייר באופן אישי.</span></div>
       <button class="btn btn-night" data-act="copy" data-text="${esc(msg)}">${icon('copy', 'ic-sm')}העתקת הודעה לדייר</button></div>`;
     C.data.apartments = await api.apartments(); render();
@@ -687,11 +709,11 @@ function annSheet(id) {
   sheet(id ? 'עריכת הודעה' : 'הודעה חדשה', `<form id="anForm">
     <div class="seg lang-tabs" role="group">${[['he', 'עברית'], ['fr', 'Français'], ['en', 'English']].map(([k, l], i) => `<button type="button" data-act="ann-lang" data-l="${k}" aria-pressed="${i === 0}">${l}</button>`).join('')}</div>
     ${['he', 'fr', 'en'].map(l => `<div data-pane="${l}" ${l !== 'he' ? 'hidden' : ''} ${l !== 'he' ? 'dir="ltr"' : ''}>
-      <div class="field"><label for="anT${l}">${l === 'he' ? 'כותרת' : 'Titre / Title'}${l === 'he' ? '' : ' (לא חובה)'}</label><input class="input" id="anT${l}" name="title_${l}" maxlength="140" value="${esc(l === 'he' ? a.title || '' : tr[l]?.title || '')}"></div>
-      <div class="field"><label for="anB${l}">${l === 'he' ? 'תוכן' : 'Texte / Text'}</label><textarea class="textarea" id="anB${l}" name="body_${l}" maxlength="5000" style="min-height:130px">${esc(l === 'he' ? a.body || '' : tr[l]?.body || '')}</textarea></div></div>`).join('')}
+      <div class="field"><label for="anT${l}">${{ he: 'כותרת', fr: 'כותרת בצרפתית (לא חובה)', en: 'כותרת באנגלית (לא חובה)' }[l]}</label><input class="input" id="anT${l}" name="title_${l}" maxlength="140" value="${esc(l === 'he' ? a.title || '' : tr[l]?.title || '')}"></div>
+      <div class="field"><label for="anB${l}">${{ he: 'תוכן', fr: 'תוכן בצרפתית', en: 'תוכן באנגלית' }[l]}</label><textarea class="textarea" id="anB${l}" name="body_${l}" maxlength="5000" style="min-height:130px">${esc(l === 'he' ? a.body || '' : tr[l]?.body || '')}</textarea></div></div>`).join('')}
     <div class="props" style="margin-bottom:14px">
       <div class="field"><label for="anC">סוג</label><select class="select" id="anC" name="category">${Object.entries(ANN_CAT).map(([k, l]) => `<option value="${k}" ${a.category === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-      <div class="field"><label for="anTw">קהל יעד</label><select class="select" id="anTw" name="tower"><option value="">כל הבניינים</option>${[1, 2, 3, 4].map(n => `<option value="${n}" ${a.tower_id === n ? 'selected' : ''}>בניין ${n}</option>`).join('')}</select></div>
+      <div class="field"><label for="anTw">קהל יעד</label><select class="select" id="anTw" name="tower"><option value="">כל המתחם</option><optgroup label="בניין">${[1, 2, 3, 4].map(n => `<option value="t${n}" ${!a.entrance && a.tower_id === n ? 'selected' : ''}>בניין ${n} (כניסות ${entrancesOfTower(n).join(', ')})</option>`).join('')}</optgroup><optgroup label="כניסה">${ENTRANCES.map(e => `<option value="e${e.id}" ${a.entrance === e.id ? 'selected' : ''}>כניסה ${e.id}</option>`).join('')}</optgroup></select></div>
       <div class="field"><label for="anE">תאריך תפוגה</label><input class="input" type="date" id="anE" name="expires" value="${a.expires_at ? a.expires_at.slice(0, 10) : ''}"></div>
     </div>
     <label class="check" style="margin-bottom:8px"><input type="checkbox" name="pinned" ${a.pinned ? 'checked' : ''}><span>הצמדה לראש הרשימה</span></label>
@@ -703,7 +725,7 @@ function annSheet(id) {
       const translations = {};
       for (const l of ['fr', 'en']) if (f['title_' + l].value.trim() && f['body_' + l].value.trim()) translations[l] = { title: f['title_' + l].value.trim(), body: f['body_' + l].value.trim() };
       try {
-        await api.saveAnnouncement({ ...(id ? { id } : {}), title: f.title_he.value.trim(), body: f.body_he.value.trim(), translations, category: f.category.value, tower_id: f.tower.value ? Number(f.tower.value) : null, pinned: f.pinned.checked, published: f.published.checked, expires_at: f.expires.value ? new Date(f.expires.value + 'T23:59:00').toISOString() : null });
+        await api.saveAnnouncement({ ...(id ? { id } : {}), title: f.title_he.value.trim(), body: f.body_he.value.trim(), translations, category: f.category.value, tower_id: f.tower.value.startsWith('t') ? Number(f.tower.value.slice(1)) : f.tower.value.startsWith('e') ? towerOfEntrance(f.tower.value.slice(1)) : null, entrance: f.tower.value.startsWith('e') ? Number(f.tower.value.slice(1)) : null, pinned: f.pinned.checked, published: f.published.checked, expires_at: f.expires.value ? new Date(f.expires.value + 'T23:59:00').toISOString() : null });
         toast(f.published.checked ? 'ההודעה פורסמה' : 'הטיוטה נשמרה'); closeSheet(); C.data.announcements = await api.announcements(); render();
       } catch (x) { formErr(ov, errMsg(x)); }
     });
@@ -733,7 +755,7 @@ function globalSearch(q) {
   q = q.trim().toLowerCase();
   if (q.length < 1) { box.hidden = true; return; }
   const T = (C.data.tickets || []).filter(t => [t.ref, t.title, t.description].some(v => String(v || '').toLowerCase().includes(q))).slice(0, 6);
-  const A = C.data.apartments.filter(a => `${a.tower_id}-${a.number}`.includes(q) || String(a.number) === q || (a.label || '').toLowerCase().includes(q)).slice(0, 5);
+  const A = C.data.apartments.filter(a => `${a.entrance}-${a.number}`.includes(q) || String(a.number) === q || (a.label || '').toLowerCase().includes(q)).slice(0, 5);
   const V = C.data.vendors.filter(v => [v.name, v.trade, v.contact_name].some(x => String(x || '').toLowerCase().includes(q))).slice(0, 4);
   const D = C.data.directory.filter(e => e.name.toLowerCase().includes(q) || he(TRADES, e.trade).includes(q)).slice(0, 4);
   const grp = (title, items) => items.length ? `<div class="grp">${title}</div>${items.join('')}` : '';
@@ -781,10 +803,10 @@ const actions = {
   'auth-mode': () => { C.authMode = C.authMode === 'login' ? 'bootstrap' : 'login'; C.authError = ''; render(); },
   nav: () => $('#crm')?.classList.toggle('nav-open'),
   reload: () => loadAll(),
-  kpi: (el) => { const g = el.dataset.go ? JSON.parse(el.dataset.go) : {}; C.f = { status: 'open', priority: '', tower: '', category: '', assignee: '', q: '', ...g }; location.hash = 'tickets'; },
+  kpi: (el) => { const g = el.dataset.go ? JSON.parse(el.dataset.go) : {}; C.f = { status: 'open', priority: '', place: '', area: '', category: '', assignee: '', q: '', ...g }; location.hash = 'tickets'; },
   view: (el) => { C.view = el.dataset.v; try { localStorage.setItem('fl-crm-view', C.view); } catch { /* ignore */ } render(); },
   'f-status': (el) => { C.f.status = el.dataset.v; render(); },
-  'f-clear': () => { C.f = { ...C.f, priority: '', tower: '', category: '', assignee: '', q: '' }; render(); },
+  'f-clear': () => { C.f = { ...C.f, priority: '', place: '', area: '', category: '', assignee: '', q: '' }; render(); },
   'open-ticket': (el) => openTicket(Number(el.dataset.id)),
   'close-drawer': () => closeDrawer(),
   'close-sheet': () => closeSheet(),
@@ -798,7 +820,7 @@ const actions = {
   'set-pin': (el) => setPin(Number(el.dataset.id)),
   'apt-disable': async (el) => {
     const a = aptOf(Number(el.dataset.id));
-    if (!confirm(`לנתק את הגישה של בניין ${a.tower_id}, דירה ${a.number}? הדיירים יידרשו לקוד חדש.`)) return;
+    if (!confirm(`לנתק את הגישה של כניסה ${a.entrance}, דירה ${a.number}? הדיירים יידרשו לקוד חדש.`)) return;
     try { await api.adminCall('apartment_disable', { apartment_id: a.id }); toast('הגישה נותקה'); C.data.apartments = await api.apartments(); render(); } catch (x) { toast(errMsg(x), 'error'); }
   },
   copy: async (el) => { try { await navigator.clipboard.writeText(el.dataset.text); toast('הועתק'); } catch { toast('לא ניתן להעתיק אוטומטית', 'error'); } },
@@ -823,7 +845,7 @@ const actions = {
   }),
   'staff-active': async (el) => { try { await api.updateStaff(el.dataset.id, { active: el.dataset.v === 'true' }); C.data.staff = await api.staff(); render(); } catch (x) { toast(errMsg(x), 'error'); } },
   'g-ticket': (el) => { location.hash = 'tickets'; openTicket(Number(el.dataset.id)); },
-  'g-apt': (el) => { const a = aptOf(Number(el.dataset.id)); C.aptTower = String(a.tower_id); C.aptQ = String(a.number); location.hash = 'buildings'; render(); },
+  'g-apt': (el) => { const a = aptOf(Number(el.dataset.id)); C.aptTower = String(a.entrance); C.aptQ = String(a.number); location.hash = 'buildings'; render(); },
   'g-page': (el) => { location.hash = el.dataset.p; },
 };
 document.addEventListener('click', (e) => {

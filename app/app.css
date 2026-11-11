@@ -17,6 +17,12 @@ h1, h2, h3 { margin: 0; }
 .login .field > label, .login .field > .label { color: #C7D2E1; }
 .login .input { background: rgba(255,255,255,.06); border-color: rgba(232,208,143,.28); color: var(--white); min-height: 54px; font-size: var(--fs-md); }
 .login .input::placeholder { color: #7F8EA5; }
+.entrance-pick { display: flex; gap: 10px; justify-content: space-between; }
+.ent-group { flex: 1 1 auto; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px 4px 0; border-radius: var(--r-md); border: 1px solid rgba(232,208,143,.18); background: rgba(255,255,255,.03); }
+.ent-group > span { grid-column: 1 / -1; grid-row: 2; text-align: center; font-size: 11px; color: #8A99B0; padding: 2px 0 4px; }
+.ent-group button { min-height: 48px; border-radius: 10px; border: 1px solid rgba(232,208,143,.22); background: rgba(255,255,255,.04); color: #E6ECF4; cursor: pointer; }
+.ent-group button b { font-family: var(--font-display); font-size: 1.35rem; font-weight: 500; }
+.ent-group button[aria-pressed="true"] { background: linear-gradient(180deg, var(--gold-300), var(--gold-500)); border-color: var(--gold-400); color: var(--night-950); }
 .tower-pick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .tower-pick button { display: grid; justify-items: center; gap: 6px; padding: 12px 4px 10px; border-radius: var(--r-md); border: 1px solid rgba(232,208,143,.22); background: rgba(255,255,255,.04); color: #D6DEEA; font-weight: 600; cursor: pointer; transition: background .15s, border-color .15s; }
 .tower-pick button .ic { width: 26px; height: 26px; color: var(--gold-400); }
@@ -205,3 +211,20 @@ h1, h2, h3 { margin: 0; }
 .tower-card h2 { font-family: var(--font-display); font-weight: 500; font-size: var(--fs-2xl); color: var(--gold-300); }
 .tower-card p { margin: 0; color: #B9C6D8; font-size: var(--fs-sm); }
 .tower-card img { grid-row: span 2; width: 96px; border-radius: 10px; }
+
+/* Zones communes + encadrés d'aide */
+.area-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; margin-top: 12px; }
+.area-grid button { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-radius: var(--r-sm); border: 1px solid var(--line-2); background: var(--white); cursor: pointer; font-size: var(--fs-sm); font-weight: 600; color: var(--ink-2); text-align: start; }
+.area-grid button .ic { width: 18px; height: 18px; color: var(--night-600); flex: none; }
+.area-grid button[aria-pressed="true"] { border-color: var(--gold-500); background: #FFFCF3; color: var(--ink); box-shadow: var(--ring); }
+.guide { display: grid; grid-template-columns: auto 1fr; gap: 12px; margin-top: 14px; padding: 14px; border-radius: var(--r-md); background: var(--st-new-bg); border: 1px solid #C9D9EA; color: var(--ink); }
+.guide > .ic { width: 26px; height: 26px; color: var(--st-new); }
+.guide p { margin: 4px 0 0; font-size: var(--fs-sm); color: var(--ink-2); }
+.guide .btn-row { margin-top: 10px; }
+.guide details { margin-top: 8px; font-size: var(--fs-sm); }
+.guide summary { cursor: pointer; font-weight: 600; color: var(--st-new); }
+.guide-city { background: #FBF6E8; border-color: #EBDDB4; }
+.guide-city > .ic { color: var(--gold-700); }
+.guide-danger { background: var(--pr-urgent-bg); border-color: #EFC3BF; }
+.guide-danger > .ic { color: var(--pr-urgent); }
+.guide-steps { margin: 10px 0 4px; padding-inline-start: 20px; font-size: var(--fs-sm); color: var(--ink-2); display: grid; gap: 4px; }
