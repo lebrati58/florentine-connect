@@ -16,7 +16,7 @@ const ERR = {
   cannot_cancel: 'לא ניתן לבטל.', unknown: 'אירעה שגיאה. נסו שוב.',
   vote_closed: 'ההצבעה סגורה.', not_eligible: 'הדירה אינה משתתפת בהצבעה זו.', proxy_limit: 'מיופה הכוח הגיע למספר המרבי של ייפויי כוח בהצבעה זו.',
   vote_locked: 'ההצבעה כבר נפתחה: הכללים והאפשרויות נעולים.', vote_without_options: 'לא ניתן לפתוח הצבעה ללא אפשרויות.', self_proxy: 'מייפה הכוח ומיופה הכוח זהים.',
-  proxy_not_awaiting: 'ייפוי הכוח כבר טופל.', owner_already_voted: 'הדירה כבר הצביעה בעצמה.', no_proxy: 'אין ייפוי כוח מאושר.',
+  proxy_not_awaiting: 'ייפוי הכוח כבר טופל.', slot_full: 'המועד מלא.', campaign_closed: 'ההרשמה סגורה.', campaign_without_slots: 'לא ניתן לפתוח תיאום ללא מועדים.', slot_not_found: 'המועד לא נמצא.', owner_already_voted: 'הדירה כבר הצביעה בעצמה.', no_proxy: 'אין ייפוי כוח מאושר.',
 };
 const errMsg = (e) => {
   const m = String(e?.message || e || '');
@@ -30,7 +30,7 @@ const initials = (n) => (n || '?').trim().split(/\s+/).map(x => x[0]).slice(0, 2
 /* ------------------------------------------------------------------ état */
 const C = {
   session: null, me: null, bootstrap: false, authError: '', authBusy: false, authMode: 'login',
-  data: { tickets: null, staff: [], apartments: [], towers: [], vendors: [], interventions: [], announcements: [], directory: [], reports: [], legacy: null, votes: [], proxies: [] },
+  data: { tickets: null, staff: [], apartments: [], towers: [], vendors: [], interventions: [], announcements: [], directory: [], reports: [], legacy: null, votes: [], proxies: [], visits: [] },
   summaries: {},
   errors: {}, lastSync: null, live: false,
   page: 'dashboard', view: 'table', drawer: null, drawerData: null, photoUrls: {},
@@ -53,6 +53,7 @@ const PAGES = [
   { key: 'buildings', icon: 'towers', label: 'בניינים ודירות' },
   { key: 'announcements', icon: 'megaphone', label: 'הודעות לדיירים' },
   { key: 'directory', icon: 'book', label: 'ספר בעלי מקצוע', count: () => C.data.reports.length || 0 },
+  { key: 'visits', icon: 'calendar', label: 'תיאום מועדים', count: () => C.data.visits.filter(c => c.status === 'open').length },
   { key: 'votes', icon: 'vote', label: 'הצבעות וייפויי כוח', count: () => C.data.proxies.filter(p => p.status === 'awaiting_approval').length, alert: () => C.data.proxies.some(p => p.status === 'awaiting_approval') },
   { group: 'ניהול' },
   { key: 'team', icon: 'users', label: 'צוות והרשאות' },
@@ -64,7 +65,7 @@ async function loadAll() {
     tickets: () => api.tickets({ limit: 2000 }), staff: () => api.staff(), apartments: () => api.apartments(),
     towers: () => api.towers(), vendors: () => api.vendors(), interventions: () => api.interventions(),
     announcements: () => api.announcements(), directory: () => api.directory(), reports: () => api.directoryReports(),
-    votes: () => api.votes(), proxies: () => api.proxies(),
+    votes: () => api.votes(), proxies: () => api.proxies(), visits: () => api.visitCampaigns(),
   };
   const res = await Promise.allSettled(Object.values(jobs).map(f => f()));
   Object.keys(jobs).forEach((k, i) => {
@@ -202,6 +203,7 @@ function pageHtml() {
     case 'directory': return pageDirectory();
     case 'team': return pageTeam();
     case 'votes': return pageVotes();
+    case 'visits': return pageVisits();
     default: return pageDashboard();
   }
 }
@@ -697,6 +699,136 @@ function paperProxySheet() {
   });
 }
 
+/* ------------------------------------------------------------------ prise de rendez-vous */
+const CSTATUS = { draft: ['טיוטה', 'st-waiting'], open: ['פתוח לדיירים', 'st-in_progress'], closed: ['נסגר', 'st-closed'], cancelled: ['בוטל', 'st-cancelled'] };
+const hm = (d) => fmtDate(d, 'he', { hour: '2-digit', minute: '2-digit', hour12: false });
+const slotLabel = (x) => `${fmtDate(x.starts_at, 'he', { weekday: 'short', day: 'numeric', month: 'numeric' })} · \u2066${hm(x.starts_at)}–${hm(x.ends_at)}\u2069`;
+const capOf = (c) => (c.visit_slots || []).reduce((n, x) => n + x.capacity, 0);
+function pageVisits() {
+  const V = C.data.visits;
+  return `${errBanner('visits')}
+  <div class="page-title"><div><h1>תיאום מועדים</h1><p>כשצריך להיכנס לדירות (רחפן, בדיקת גלאים, טכנאי…): מציעים מועדים, כל דירה בוחרת, ורואים את היומן המשותף.</p></div>
+    ${can.edit() ? `<button class="btn btn-gold" data-act="visit-form">${icon('plus', 'ic-sm')}תיאום חדש</button>` : ''}</div>
+  ${readOnly()}
+  <section class="card">${V.length ? `<div class="tbl-wrap"><table class="tbl responsive"><thead><tr><th>נושא</th><th>סטטוס</th><th data-hide-m>קהל</th><th data-hide-m>מועדים</th><th data-hide-m>מענה עד</th></tr></thead><tbody>
+    ${V.map(c => `<tr class="clickable" data-act="visit-open" data-id="${c.id}"><td><div class="ttl">${esc(c.title)}</div><div class="sub">${(c.visit_slots || [])[0] ? esc(slotLabel(c.visit_slots[0])) + ((c.visit_slots || []).length > 1 ? ' …' : '') : 'ללא מועדים'}</div></td>
+      <td><span class="badge ${CSTATUS[c.status][1]}">${CSTATUS[c.status][0]}</span></td><td data-hide-m>${scopeLabel(c)}</td>
+      <td data-hide-m>${(c.visit_slots || []).length} מועדים · ${capOf(c)} מקומות</td><td data-hide-m class="sub">${c.respond_until ? esc(fmtDateTime(c.respond_until, 'he')) : '—'}</td></tr>`).join('')}</tbody></table></div>`
+    : `<div class="card-b">${empty('calendar', 'עדיין אין תיאומים', 'לדוגמה: מעבר הרחפן לבדיקת החזיתות — הציעו מועדים, והדיירים יבחרו מתי אפשר להגיע.', can.edit() ? `<button class="btn btn-night" data-act="visit-form">${icon('plus', 'ic-sm')}תיאום חדש</button>` : '')}</div>`}</section>
+  <p class="data-note">${icon('info', 'ic-sm')}הדיירים רואים רק כמה מקומות פנויים בכל מועד, לא אילו דירות בחרו. היומן המלא גלוי לצוות בלבד.</p>`;
+}
+function visitFormSheet(id) {
+  const c = id ? C.data.visits.find(x => x.id === id) : { translations: {}, visit_slots: [] };
+  const tr = c.translations || {};
+  let slots = (c.visit_slots || []).map(x => ({ ...x }));
+  const dt = (x) => x ? new Date(new Date(x).getTime() - new Date(x).getTimezoneOffset() * 6e4).toISOString().slice(0, 16) : '';
+  const listHtml = () => slots.length ? slots.sort((a, b) => a.starts_at.localeCompare(b.starts_at)).map((x, i) => `<div class="iv"><div><b>${esc(slotLabel(x))}</b><div class="sub muted">${x.capacity} ${x.capacity === 1 ? 'דירה' : 'דירות'}</div></div><button type="button" class="btn btn-ghost btn-sm" data-rm-slot="${i}" aria-label="הסרת המועד">${icon('x', 'ic-sm')}</button></div>`).join('') : '<p class="muted" style="margin:0">עדיין לא נוספו מועדים.</p>';
+  sheet(id ? 'עריכת תיאום' : 'תיאום מועד חדש', `<form id="cForm">
+    <div class="seg lang-tabs" role="group">${[['he', 'עברית'], ['fr', 'Français'], ['en', 'English']].map(([k, l], i) => `<button type="button" data-act="ann-lang" data-l="${k}" aria-pressed="${i === 0}">${l}</button>`).join('')}</div>
+    ${['he', 'fr', 'en'].map(l => `<div data-pane="${l}" ${l !== 'he' ? 'hidden dir="ltr"' : ''}>
+      <div class="field"><label for="cT${l}">${{ he: 'כותרת (למשל: מעבר רחפן לבדיקת החזיתות)', fr: 'כותרת בצרפתית', en: 'כותרת באנגלית' }[l]}</label><input class="input" id="cT${l}" name="title_${l}" maxlength="160" value="${esc(l === 'he' ? c.title || '' : tr[l]?.title || '')}"></div>
+      <div class="field"><label for="cB${l}">${{ he: 'ההודעה לדיירים', fr: 'ההודעה בצרפתית', en: 'ההודעה באנגלית' }[l]}</label><textarea class="textarea" id="cB${l}" name="body_${l}" maxlength="5000" style="min-height:120px">${esc(l === 'he' ? c.body || '' : tr[l]?.body || '')}</textarea></div></div>`).join('')}
+    <div class="props" style="margin-bottom:14px">
+      <div class="field"><label for="cS">דירות מוזמנות</label><select class="select" id="cS" name="scope"><option value="">כל המתחם</option><optgroup label="בניין">${[1, 2, 3, 4].map(n => `<option value="t${n}" ${!c.scope_entrance && c.scope_tower === n ? 'selected' : ''}>בניין ${n}</option>`).join('')}</optgroup><optgroup label="כניסה">${ENTRANCES.map(e => `<option value="e${e.id}" ${c.scope_entrance === e.id ? 'selected' : ''}>כניסה ${e.id}</option>`).join('')}</optgroup></select></div>
+      <div class="field"><label for="cU">מענה עד (לא חובה)</label><input class="input" type="datetime-local" id="cU" name="until" value="${dt(c.respond_until)}"></div>
+    </div>
+    <fieldset class="panel" style="margin:0 0 14px;border:1px solid var(--line);padding:12px"><legend style="font-weight:600;padding:0 6px">מועדים</legend>
+      <div class="props">
+        <div class="field"><label for="gD">תאריך</label><input class="input" type="date" id="gD"></div>
+        <div class="field"><label for="gF">משעה</label><input class="input" type="time" id="gF" value="09:00"></div>
+        <div class="field"><label for="gT">עד שעה</label><input class="input" type="time" id="gT" value="13:00"></div>
+        <div class="field"><label for="gL">אורך כל מועד</label><select class="select" id="gL">${[[15, '15 דק׳'], [30, '30 דק׳'], [60, 'שעה'], [120, 'שעתיים'], [0, 'מועד אחד לכל הטווח']].map(([v, l]) => `<option value="${v}" ${v === 60 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div class="field"><label for="gC">דירות בכל מועד</label><input class="input" type="number" id="gC" min="1" max="500" value="4"></div>
+      </div>
+      <button type="button" class="btn btn-line btn-sm" id="gAdd">${icon('plus', 'ic-sm')}הוספת המועדים</button>
+      <div id="slotList" style="margin-top:10px">${listHtml()}</div>
+      ${id ? '<p class="hint" style="margin:8px 0 0">הסרת מועד שכבר נבחר תבקש מהדיירים שבחרו בו לבחור מחדש.</p>' : ''}
+    </fieldset>
+    <p class="hint" style="margin:-4px 0 12px">נדרש נוסח בעברית, בצרפתית ובאנגלית לפני הפתיחה לדיירים.</p>
+    <p class="form-error" role="alert"></p><button class="btn btn-gold btn-block" type="submit">שמירה</button></form>`, (ov) => {
+    const redraw = () => { $('#slotList', ov).innerHTML = listHtml(); };
+    $('#slotList', ov).addEventListener('click', (e) => { const b = e.target.closest('[data-rm-slot]'); if (b) { slots.splice(Number(b.dataset.rmSlot), 1); redraw(); } });
+    $('#gAdd', ov).addEventListener('click', () => {
+      const d = $('#gD', ov).value, f = $('#gF', ov).value, to = $('#gT', ov).value, len = Number($('#gL', ov).value), cap = Number($('#gC', ov).value);
+      if (!d || !f || !to) return formErr(ov, 'בחרו תאריך ושעות.');
+      if (!(cap >= 1 && cap <= 500)) return formErr(ov, 'מספר הדירות בכל מועד: בין 1 ל־500.');
+      const a = new Date(`${d}T${f}`), b = new Date(`${d}T${to}`);
+      if (!(b > a)) return formErr(ov, 'שעת הסיום חייבת להיות אחרי שעת ההתחלה.');
+      const step = len ? len * 6e4 : b - a; let n = 0;
+      for (let x = a.getTime(); x + step <= b.getTime() && n < 60; x += step, n++) {
+        const st = new Date(x).toISOString(), en = new Date(x + step).toISOString();
+        if (!slots.some(y => y.starts_at.slice(0, 16) === st.slice(0, 16))) slots.push({ starts_at: st, ends_at: en, capacity: cap });
+      }
+      if (!n) return formErr(ov, 'הטווח קצר מאורך המועד.');
+      formErr(ov, ''); redraw();
+    });
+    $('#cForm', ov).addEventListener('submit', async (e) => {
+      e.preventDefault(); const f = e.target;
+      if (f.title_he.value.trim().length < 3) return formErr(ov, 'יש להזין כותרת בעברית (3 תווים לפחות).');
+      const translations = {};
+      for (const l of ['fr', 'en']) if (f['title_' + l].value.trim()) translations[l] = { title: f['title_' + l].value.trim(), body: f['body_' + l].value.trim() || null };
+      const sc = f.scope.value;
+      const payload = { title: f.title_he.value.trim(), body: f.body_he.value.trim() || null, translations,
+        respond_until: f.until.value ? new Date(f.until.value).toISOString() : null,
+        scope_tower: sc.startsWith('t') ? Number(sc.slice(1)) : sc.startsWith('e') ? towerOfEntrance(sc.slice(1)) : null, scope_entrance: sc.startsWith('e') ? Number(sc.slice(1)) : null };
+      try { const v = await api.saveCampaign({ ...(id ? { id } : {}), ...payload }, slots); toast('התיאום נשמר'); closeSheet(); C.data.visits = await api.visitCampaigns(); render(); visitSheet(v.id); }
+      catch (x) { formErr(ov, errMsg(x)); }
+    });
+  });
+}
+async function visitSheet(id) {
+  const c = C.data.visits.find(x => x.id === id); if (!c) return;
+  const ov = sheet(esc(c.title), '<div class="skel" style="height:200px"></div>');
+  let rows;
+  try { rows = await api.visitSchedule(id); }
+  catch (e) { $('.sheet-body', ov).innerHTML = `<div class="banner banner-error">${esc(errMsg(e))}</div>`; return; }
+  const slots = c.visit_slots || [];
+  const by = (sid) => rows.filter(r => r.slot_id === sid);
+  const none = rows.filter(r => r.unavailable), wait = rows.filter(r => !r.slot_id && !r.unavailable);
+  const apt = (r) => `כניסה ${r.entrance} · דירה ${esc(r.number)}${r.floor != null ? ` · קומה ${r.floor}` : ''}`;
+  const who = (r) => `<li><b>${apt(r)}</b>${r.note ? `<div class="sub">${esc(r.note)}</div>` : ''}${r.source === 'staff' ? '<div class="sub muted">נקבע ע״י הצוות</div>' : ''}${can.edit() ? ` <button class="link-btn" data-clear-apt="${r.apartment_id}">הסרה</button>` : ''}</li>`;
+  $('.sheet-body', ov).innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><span class="badge ${CSTATUS[c.status][1]}">${CSTATUS[c.status][0]}</span><span class="badge no-dot st-closed">${scopeLabel(c)}</span>${c.respond_until ? `<span class="badge no-dot pr-normal">מענה עד ${esc(fmtDateTime(c.respond_until, 'he'))}</span>` : ''}</div>
+    <div class="btn-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      ${can.edit() && ['draft', 'open'].includes(c.status) ? `<button class="btn btn-line btn-sm" data-act="visit-form" data-id="${c.id}">${icon('edit', 'ic-sm')}עריכה ומועדים</button>` : ''}
+      ${can.edit() && c.status === 'draft' ? `<button class="btn btn-gold btn-sm" data-act="visit-status" data-id="${c.id}" data-s="open">${icon('send', 'ic-sm flip-rtl')}שליחה לדיירים</button>` : ''}
+      ${can.edit() && c.status === 'open' ? `<button class="btn btn-night btn-sm" data-act="visit-status" data-id="${c.id}" data-s="closed">${icon('lock', 'ic-sm')}סגירת ההרשמה</button>` : ''}
+      ${can.edit() && c.status === 'closed' ? `<button class="btn btn-line btn-sm" data-act="visit-status" data-id="${c.id}" data-s="open">פתיחה מחדש</button>` : ''}
+      ${can.edit() && ['draft', 'open'].includes(c.status) ? `<button class="btn btn-danger btn-sm" data-act="visit-status" data-id="${c.id}" data-s="cancelled">ביטול</button>` : ''}
+      <button class="btn btn-ghost btn-sm" id="vPrint">${icon('download', 'ic-sm')}הדפסת היומן</button></div>
+    <dl class="kv" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
+      <div><dt>בחרו מועד</dt><dd>${rows.filter(r => r.slot_id).length} / ${rows.length}</dd></div>
+      <div><dt>אף מועד לא מתאים</dt><dd>${none.length}</dd></div><div><dt>טרם השיבו</dt><dd>${wait.length}</dd></div></dl>
+    <div class="cal">${slots.map(x => { const r = by(x.id); return `<div class="cal-slot${r.length >= x.capacity ? ' full' : ''}"><div class="cal-h"><b>${esc(slotLabel(x))}</b><span class="badge no-dot ${r.length >= x.capacity ? 'st-resolved' : 'st-closed'}">${r.length}/${x.capacity}</span></div>
+      ${r.length ? `<ul>${r.map(who).join('')}</ul>` : '<p class="muted" style="margin:4px 0 0">אין עדיין דירות</p>'}</div>`; }).join('')}</div>
+    ${none.length ? `<b style="display:block;margin:16px 0 6px">אף מועד לא מתאים — ליצור קשר (${none.length})</b><ul class="cal-list">${none.map(who).join('')}</ul>` : ''}
+    ${wait.length ? `<b style="display:block;margin:16px 0 6px">טרם השיבו (${wait.length})</b><p class="sub muted" style="margin:0">${wait.map(apt).join(' · ')}</p>` : ''}
+    ${can.edit() && ['open', 'closed'].includes(c.status) && slots.length ? `<form id="sbForm" class="panel" style="margin-top:16px"><b style="display:block;margin-bottom:8px">שיבוץ דירה (בטלפון, בלובי…)</b>
+      <div class="props"><div class="field"><label for="sbA">דירה</label><select class="select" id="sbA">${rows.map(r => `<option value="${r.apartment_id}">${apt(r)}${r.slot_id ? ' (משובצת)' : ''}</option>`).join('')}</select></div>
+      <div class="field"><label for="sbS">מועד</label><select class="select" id="sbS">${slots.map(x => `<option value="${x.id}">${esc(slotLabel(x))} (${by(x.id).length}/${x.capacity})</option>`).join('')}<option value="">אף מועד לא מתאים</option></select></div></div>
+      <div class="field"><label for="sbN">הערה</label><input class="input" id="sbN" maxlength="500" placeholder="מפתח אצל השומר…"></div>
+      <p class="form-error" role="alert"></p><button class="btn btn-night btn-sm" type="submit">שיבוץ</button></form>` : ''}`;
+  $('#sbForm', ov)?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await api.staffBookVisit(id, $('#sbS', ov).value ? Number($('#sbS', ov).value) : null, Number($('#sbA', ov).value), $('#sbN', ov).value.trim()); toast('השיבוץ נשמר'); visitSheet(id); }
+    catch (x) { formErr(ov, errMsg(x)); }
+  });
+  $$('[data-clear-apt]', ov).forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('להסיר את תשובת הדירה?')) return;
+    try { await api.staffClearVisit(id, Number(b.dataset.clearApt)); toast('התשובה הוסרה'); visitSheet(id); } catch (x) { toast(errMsg(x), 'error'); }
+  }));
+  $('#vPrint', ov).addEventListener('click', () => {
+    const w = window.open('', '_blank'); if (!w) return toast('הדפדפן חסם את החלון. אפשרו חלונות קופצים.', 'error');
+    const td = (r) => `<td>כניסה ${r.entrance}</td><td>${esc(r.number)}</td><td>${r.floor ?? ''}</td><td>${esc(r.note || '')}</td>`;
+    w.document.write(`<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8"><title>${esc(c.title)}</title><style>body{font-family:system-ui,sans-serif;margin:24px;color:#111}h1{font-size:20px}h2{font-size:15px;margin:18px 0 6px}table{width:100%;border-collapse:collapse;font-size:13px}td,th{border:1px solid #bbb;padding:6px 8px;text-align:start}th{background:#f2f2f2}</style>
+      <h1>${esc(c.title)}</h1><p>${scopeLabel(c)} · הודפס ${esc(fmtDateTime(new Date(), 'he'))}</p>
+      ${slots.map(x => `<h2>${esc(slotLabel(x))} — ${by(x.id).length}/${x.capacity}</h2><table><tr><th>כניסה</th><th>דירה</th><th>קומה</th><th>הערה</th></tr>${by(x.id).map(r => `<tr>${td(r)}</tr>`).join('') || '<tr><td colspan="4">—</td></tr>'}</table>`).join('')}
+      ${none.length ? `<h2>אף מועד לא מתאים</h2><table><tr><th>כניסה</th><th>דירה</th><th>קומה</th><th>הערה</th></tr>${none.map(r => `<tr>${td(r)}</tr>`).join('')}</table>` : ''}
+      ${wait.length ? `<h2>טרם השיבו</h2><p>${wait.map(apt).join(' · ')}</p>` : ''}</html>`);
+    w.document.close(); w.focus(); w.print();
+  });
+}
+
 /* ------------------------------------------------------------------ équipe */
 function pageTeam() {
   const S = C.data.staff;
@@ -993,6 +1125,20 @@ const actions = {
   'resolve-report': async (el) => { try { await api.resolveReport(Number(el.dataset.id)); toast('הדיווח סומן כמטופל'); C.data.reports = await api.directoryReports(); render(); } catch (x) { toast(errMsg(x), 'error'); } },
   'staff-form': () => staffSheet(),
   'vote-form': (el) => voteFormSheet(el.dataset.id ? Number(el.dataset.id) : null),
+  'visit-form': (el) => visitFormSheet(el.dataset.id ? Number(el.dataset.id) : null),
+  'visit-open': (el) => visitSheet(Number(el.dataset.id)),
+  'visit-status': async (el) => {
+    const st = el.dataset.s, id = Number(el.dataset.id), c = C.data.visits.find(x => x.id === id);
+    if (st === 'open') {
+      const miss = missingLangs(c.title, c.body, c.translations);
+      if (miss.length) { toast(`חסר תרגום ל${miss.join(' ול')}. השלימו בעריכה לפני השליחה לדיירים.`, 'error'); return; }
+      if (!(c.visit_slots || []).length) { toast(ERR.campaign_without_slots, 'error'); return; }
+    }
+    const msg = { open: 'לשלוח את הבקשה לדיירים? הם יוכלו לבחור מועד מיד.', closed: 'לסגור את ההרשמה? הדיירים לא יוכלו עוד לשנות.', cancelled: 'לבטל את התיאום? הוא יוסתר מהדיירים.' }[st];
+    if (!confirm(msg)) return;
+    try { await api.setCampaignStatus(id, st); toast({ open: 'נשלח לדיירים', closed: 'ההרשמה נסגרה', cancelled: 'התיאום בוטל' }[st]); C.data.visits = await api.visitCampaigns(); render(); visitSheet(id); }
+    catch (x) { toast(errMsg(x), 'error'); }
+  },
   'vote-open': (el) => voteSheet(Number(el.dataset.id)),
   'vote-status': async (el) => {
     const st = el.dataset.s;

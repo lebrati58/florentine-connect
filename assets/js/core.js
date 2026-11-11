@@ -178,7 +178,7 @@ export function errorKey(e) {
   if (/directory_phone_consent/.test(m)) return 'phone_consent';
   if (/duplicate key|unique/i.test(m)) return 'duplicate';
   if (/cannot_cancel/.test(m)) return 'cannot_cancel';
-  for (const k of ['vote_closed', 'not_eligible', 'no_proxy', 'owner_already_voted', 'proxies_disabled', 'holder_not_found', 'self_proxy', 'proxy_limit', 'bad_date', 'vote_locked', 'vote_without_options', 'proxy_not_pending', 'proxy_not_awaiting']) if (m.includes(k)) return k;
+  for (const k of ['vote_closed', 'not_eligible', 'no_proxy', 'owner_already_voted', 'proxies_disabled', 'holder_not_found', 'self_proxy', 'proxy_limit', 'bad_date', 'vote_locked', 'vote_without_options', 'proxy_not_pending', 'proxy_not_awaiting', 'slot_full', 'campaign_closed', 'campaign_without_slots', 'slot_not_found']) if (m.includes(k)) return k;
   if (/forbidden|permission|not_member|row-level security/i.test(m)) return 'forbidden';
   return 'unknown';
 }
@@ -343,6 +343,36 @@ export function createApi(storageKey) {
     async staffCastBallot(vote, option, apartment, note) {
       return must(await sb.rpc('staff_cast_ballot', { p_vote: vote, p_option: option, p_apartment: apartment, p_note: note }));
     },
+
+    /* Prise de rendez-vous */
+    async visitCampaigns() {
+      return must(await sb.from('visit_campaigns').select('*, visit_slots(*)').order('created_at', { ascending: false }).order('starts_at', { foreignTable: 'visit_slots' }));
+    },
+    async myVisitBookings() { return must(await sb.from('visit_bookings').select('*')); },
+    async visitSlotCounts(id) { return must(await sb.rpc('visit_slot_counts', { p_campaign: id })); },
+    async bookVisit(campaign, slot, note) { return must(await sb.rpc('book_visit_slot', { p_campaign: campaign, p_slot: slot, p_note: note || null })); },
+    async cancelVisit(campaign) { return must(await sb.rpc('cancel_visit_booking', { p_campaign: campaign })); },
+    // CRM
+    async saveCampaign(c, slots) {
+      const { id, status, ...rest } = c;
+      const v = id ? must(await sb.from('visit_campaigns').update(rest).eq('id', id).select().single())
+                   : must(await sb.from('visit_campaigns').insert(rest).select().single());
+      if (slots) {
+        const keep = slots.filter(x => x.id).map(x => x.id);
+        let del = sb.from('visit_slots').delete().eq('campaign_id', v.id);
+        if (keep.length) del = del.not('id', 'in', `(${keep.join(',')})`);
+        must(await del);
+        for (const x of slots.filter(x => x.id)) must(await sb.from('visit_slots').update({ starts_at: x.starts_at, ends_at: x.ends_at, capacity: x.capacity }).eq('id', x.id));
+        const add = slots.filter(x => !x.id).map(x => ({ campaign_id: v.id, starts_at: x.starts_at, ends_at: x.ends_at, capacity: x.capacity }));
+        if (add.length) must(await sb.from('visit_slots').insert(add));
+      }
+      if (status && status !== v.status) return this.setCampaignStatus(v.id, status);
+      return v;
+    },
+    async setCampaignStatus(id, status) { return must(await sb.from('visit_campaigns').update({ status }).eq('id', id).select().single()); },
+    async visitSchedule(id) { return must(await sb.rpc('visit_schedule', { p_campaign: id })); },
+    async staffBookVisit(campaign, slot, apartment, note) { return must(await sb.rpc('staff_book_visit', { p_campaign: campaign, p_slot: slot, p_apartment: apartment, p_note: note || null })); },
+    async staffClearVisit(campaign, apartment) { return must(await sb.from('visit_bookings').delete().eq('campaign_id', campaign).eq('apartment_id', apartment)); },
 
     /* CRM : équipe, appartements, fournisseurs, interventions */
     async staff() { return must(await sb.from('staff').select('*').order('full_name')); },

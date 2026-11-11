@@ -87,6 +87,7 @@ a { color: inherit; }
 .banner { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: var(--r-sm); font-size: var(--fs-sm); }
 .banner-warn { background: #FBF1DC; color: #6B4C10; border: 1px solid #EBD7A6; }
 .banner-error { background: #FBE6E4; color: #7E2321; border: 1px solid #EFC3BF; }
+.banner-ok { background: #E6F3EA; color: #1F5A33; border: 1px solid #BFDDC8; }
 .banner-info { background: var(--st-new-bg); color: var(--st-new); border: 1px solid #C9D9EA; }
 
 /* Feuilles / modales */

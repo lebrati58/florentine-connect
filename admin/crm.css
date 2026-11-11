@@ -202,3 +202,13 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .toolbar .search-in { flex: 1 1 100%; }
   .page-title h1 { font-size: 1.5rem; }
 }
+
+/* ---------- תיאום מועדים ---------- */
+.cal { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.cal-slot { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--white); }
+.cal-slot.full { border-color: #BFDDC8; background: #F5FBF7; }
+.cal-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cal-slot ul, .cal-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.cal-list { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.cal-slot li, .cal-list li { padding-top: 6px; border-top: 1px dashed var(--line); }
+.cal-slot li:first-child { border-top: 0; padding-top: 0; }

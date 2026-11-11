@@ -239,6 +239,40 @@ await as('owner', `update public.votes set status='open' where id=$1`, [v3]);
 ok((await as('A', `select * from public.votes where id=$1`, [v3])).rows.length === 0 && (await as('B', `select * from public.votes where id=$1`, [v3])).rows.length === 1, 'vote limité à l’entrée 3 : visible seulement par l’entrée 3');
 ok(/not_eligible/.test((await as('A', `select public.cast_ballot($1,(select id from public.vote_options where vote_id=$1))`, [v3])).error || ''), 'appartement hors périmètre : vote refusé');
 
+if (migration.includes('visit_campaigns')) {
+  console.log('\n— Prise de rendez-vous');
+  const c1 = (await as('owner', `insert into public.visit_campaigns(title,scope_tower) values ('Passage du drone — tour 1',1) returning id`)).rows[0].id;
+  ok(/campaign_without_slots/.test((await as('owner', `update public.visit_campaigns set status='open' where id=$1`, [c1])).error || ''), 'impossible d’ouvrir une campagne sans créneau');
+  ok(!!(await as('A', `insert into public.visit_campaigns(title) values ('Intrus')`)).error, 'résident ne crée pas de campagne');
+  ok((await as('viewer', `insert into public.visit_slots(campaign_id,starts_at,ends_at) values ($1, now()+interval '1 day', now()+interval '25 hours') returning id`, [c1])).error !== undefined, 'observateur ne crée pas de créneau');
+  const s1 = (await as('tech', `insert into public.visit_slots(campaign_id,starts_at,ends_at,capacity) values ($1, now()+interval '1 day', now()+interval '25 hours', 1) returning id`, [c1])).rows[0].id;
+  const s2 = (await as('tech', `insert into public.visit_slots(campaign_id,starts_at,ends_at,capacity) values ($1, now()+interval '2 day', now()+interval '49 hours', 3) returning id`, [c1])).rows[0].id;
+  ok((await as('A', `select * from public.visit_campaigns`)).rows.length === 0, 'brouillon invisible pour les résidents');
+  ok(!(await as('tech', `update public.visit_campaigns set status='open' where id=$1`, [c1])).error, 'technicien ouvre la campagne');
+  ok((await as('A', `select * from public.visit_campaigns`)).rows.length === 1, 'tour 1 : campagne visible');
+  ok((await as('B', `select * from public.visit_campaigns`)).rows.length === 0 && (await as('B', `select * from public.visit_slots`)).rows.length === 0, 'tour 2 : ni campagne ni créneaux visibles');
+  ok(/not_eligible/.test((await as('B', `select public.book_visit_slot($1,$2)`, [c1, s1])).error || ''), 'appartement hors périmètre : réservation refusée');
+  ok(!(await as('A', `select public.book_visit_slot($1,$2,'Clé chez le voisin')`, [c1, s1])).error, 'A réserve le créneau 1');
+  ok(/slot_full/.test((await as('C', `select public.book_visit_slot($1,$2)`, [c1, s1])).error || ''), 'créneau complet : C refusé');
+  ok(!(await as('A', `select public.book_visit_slot($1,$2)`, [c1, s1])).error, 'A peut re-confirmer son propre créneau complet');
+  ok(!(await as('C', `select public.book_visit_slot($1,$2)`, [c1, s2])).error, 'C réserve le créneau 2');
+  ok((await as('C', `select * from public.visit_bookings`)).rows.length === 1, 'C ne voit que sa propre réponse');
+  { const counts = (await as('C', `select * from public.visit_slot_counts($1) order by slot_id`, [c1])).rows;
+    ok(counts.length === 2 && counts[0].booked === 1 && counts[1].booked === 1, 'résident voit les places prises, pas les appartements'); }
+  ok(/forbidden/.test((await as('A', `select * from public.visit_schedule($1)`, [c1])).error || ''), 'résident ne voit pas le calendrier commun');
+  { const sch = (await as('viewer', `select * from public.visit_schedule($1)`, [c1])).rows;
+    ok(sch.length === 3 && sch.filter(r => r.slot_id).length === 2, `calendrier équipe : 3 appartements de la tour 1, 2 réponses (${sch.length})`); }
+  ok(!!(await as('A', `insert into public.visit_bookings(campaign_id,slot_id,apartment_id) values ($1,$2,(select id from public.apartments where entrance=2 and number='12'))`, [c1, s2])).error, 'écriture directe des réservations refusée');
+  ok(!!(await as('A', `update public.visit_bookings set slot_id=$1`, [s2])).error, 'modification directe refusée');
+  ok(!(await as('A', `select public.book_visit_slot($1,null,'En voyage')`, [c1])).error, 'A indique : aucun créneau ne convient');
+  ok((await db.query(`select unavailable, slot_id from public.visit_bookings where campaign_id=$1 and note='En voyage'`, [c1])).rows[0]?.unavailable === true, '…enregistré comme indisponible, créneau libéré');
+  ok(/slot_full/.test((await as('owner', `update public.visit_slots set capacity=1 where id=$1`, [s2])).error || '') === false, 'capacité réduite à 1 acceptée (1 réservation)');
+  ok(!(await as('owner', `select public.staff_book_visit($1,$2,(select id from public.apartments where entrance=2 and number='12'),'Par téléphone')`, [c1, s1])).error, 'équipe place un appartement par téléphone');
+  ok(/forbidden/.test((await as('viewer', `select public.staff_book_visit($1,$2,(select id from public.apartments where entrance=2 and number='12'))`, [c1, s1])).error || ''), 'observateur ne place personne');
+  await as('owner', `update public.visit_campaigns set respond_until=now()-interval '1 minute' where id=$1`, [c1]);
+  ok(/campaign_closed/.test((await as('C', `select public.cancel_visit_booking($1)`, [c1])).error || ''), 'date limite passée : plus de modification');
+}
+
 console.log('\n— Révocation de session (fonction serveur uniquement)');
 ok(!!(await as('A', 'select public.revoke_user_sessions($1)', [U.A])).error, 'résident ne peut pas appeler la révocation');
 

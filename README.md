@@ -71,6 +71,16 @@ Limite à connaître : le compte d'un appartement est partagé par ses occupants
 l'appartement, pas l'identité de la personne qui a cliqué. Pour les décisions qui l'exigent légalement (signature,
 majorités spéciales de la loi sur les biens immobiliers), garder le procès-verbal et les procurations signées.
 
+## Prise de rendez-vous — תיאום מועד (v2.3)
+
+Quand l'équipe doit entrer dans les appartements (passage du drone, contrôle des détecteurs, technicien…) :
+- **CRM → תיאום מועדים** : message en hébreu, français et anglais, appartements concernés (tout / tour / entrée),
+  créneaux générés automatiquement (date, plage horaire, durée, nombre d'appartements par créneau), date limite.
+- **Application** : chaque appartement choisit un créneau ou « aucun ne me convient », avec une note (clé, accès…),
+  et peut changer d'avis jusqu'à la date limite. Il voit les places restantes, **jamais** quels voisins ont choisi quoi.
+- **Calendrier commun** (équipe seulement) : qui passe à quelle heure, notes, indisponibles à rappeler, non-répondants,
+  placement par téléphone, impression du planning. La capacité est garantie côté serveur (verrou sur le créneau).
+
 ## Mise en service (une fois)
 
 1. Appliquer dans l'ordre les fichiers de `supabase/migrations/` (SQL editor ou `supabase db push`).
@@ -84,7 +94,7 @@ majorités spéciales de la loi sur les biens immobiliers), garder le procès-ve
 ## Tests
 
 ```bash
-cd tests && npm install && node rls-test.mjs <migrations séparées par des virgules>   # 119 tests d’accès
+cd tests && npm install && node rls-test.mjs <migrations séparées par des virgules>   # 143 tests d’accès
 python3 -m http.server 8811 &                    # depuis la racine du dépôt
 python3 tests/e2e.py http://localhost:8811/ tests/shots
 ```

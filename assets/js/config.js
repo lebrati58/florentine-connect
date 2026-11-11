@@ -6,5 +6,5 @@ export const CONFIG = {
   supabaseKey: 'sb_publishable_I_vfKXDNWxhVY3x3JcUfaA_jYyLEYFl',
   apartmentEmailDomain: 'apartments.4florentine.example.com',
   residentUrl: 'https://lebrati58.github.io/florentine-connect/app/',
-  version: '2.2.0',
+  version: '2.3.0',
 };

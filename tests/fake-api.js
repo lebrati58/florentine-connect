@@ -4,7 +4,8 @@
 (function () {
   const KEY = 'fl-fake-db';
   const now = () => new Date().toISOString();
-  const load = () => JSON.parse(localStorage.getItem(KEY) || 'null');
+  const LISTS = ['votes', 'vote_options', 'ballots', 'proxies', 'campaigns', 'slots', 'bookings'];
+  const load = () => { const d = JSON.parse(localStorage.getItem(KEY) || 'null'); if (d) for (const k of LISTS) d[k] = d[k] || []; return d; };
   const save = (db) => localStorage.setItem(KEY, JSON.stringify(db));
   let db = load();
   if (!db) {
@@ -29,8 +30,7 @@
     }
     save(db);
   }
-  for (const k of ['votes', 'vote_options', 'ballots', 'proxies']) db[k] = db[k] || [];
-  let session = JSON.parse(sessionStorage.getItem('fl-fake-session') || 'null');
+    let session = JSON.parse(sessionStorage.getItem('fl-fake-session') || 'null');
   const setSession = (s) => { session = s; sessionStorage.setItem('fl-fake-session', JSON.stringify(s)); };
   const fail = (m) => { const e = new Error(m); throw e; };
   const delay = (v) => new Promise(r => setTimeout(() => r(v), 60));
@@ -39,6 +39,7 @@
   const myApt = () => db.apartments.find(a => a.user_id === uid() && a.active);
   const ref = (id) => 'FL-' + String(id).padStart(5, '0');
   const inVote = (v, a) => !!a && a.active !== false && a.can_vote !== false && (!v.scope_tower || a.tower_id === v.scope_tower) && (!v.scope_entrance || a.entrance === v.scope_entrance);
+  const inCamp = (c, a) => !!a && a.active !== false && (!c.scope_tower || a.tower_id === c.scope_tower) && (!c.scope_entrance || a.entrance === c.scope_entrance);
   const ev = (ticket_id, kind, extra = {}) => db.events.push({ id: db.seq++, ticket_id, kind, actor_kind: isStaff() ? 'staff' : 'resident', is_public: true, created_at: now(), ...extra });
   const overview = (e) => { const r = db.recos.filter(x => x.entry_id === e.id); return { ...e, reco_count: r.length, avg_rating: r.length ? r.reduce((a, b) => a + b.rating, 0) / r.length : 0, open_reports: db.reports.filter(x => x.entry_id === e.id && !x.resolved_at).length }; };
   const revise = (e, kind) => db.revisions.push({ id: db.seq++, entry_id: e.id, version: e.version, change_kind: kind, snapshot: { trade: e.trade, name: e.name, phone: e.phone, phone_public_ok: e.phone_public_ok, website: e.website, area: e.area, notes: e.notes, status: e.status }, created_at: now() });
@@ -175,6 +176,35 @@
     async approveProxy(id, approve, reason) { db = load(); const p = db.proxies.find(x => x.id === id); if (p.status !== 'awaiting_approval') fail('proxy_not_awaiting'); p.status = approve ? 'active' : 'rejected'; p.rejected_reason = approve ? null : reason; save(db); return delay(); },
     async staffRegisterProxy(g, h, name, vote, until, note) { db = load(); const id = db.seq++; db.proxies.push({ id, grantor_apartment: g, holder_apartment: h, holder_name: name, vote_id: vote, valid_until: until, status: 'active', source: 'paper', note, created_at: now() }); save(db); return delay(id); },
     async staffCastBallot(vote, option, apt) { db = load(); db.ballots = db.ballots.filter(b => !(b.vote_id === vote && b.apartment_id === apt)); db.ballots.push({ id: db.seq++, vote_id: vote, apartment_id: apt, option_id: option, method: 'assembly', cast_at: now() }); save(db); return delay(); },
+    /* prise de rendez-vous */
+    async visitCampaigns() { db = load(); const a = myApt(); return delay(db.campaigns.filter(c => isStaff() || (['open', 'closed'].includes(c.status) && inCamp(c, a))).map(c => ({ ...c, visit_slots: db.slots.filter(x => x.campaign_id === c.id).sort((x, y) => x.starts_at.localeCompare(y.starts_at)) }))); },
+    async myVisitBookings() { db = load(); const a = myApt(); return delay(isStaff() ? db.bookings : db.bookings.filter(b => b.apartment_id === a?.id)); },
+    async visitSlotCounts(id) { db = load(); return delay(db.slots.filter(x => x.campaign_id === id).map(x => ({ slot_id: x.id, booked: db.bookings.filter(b => b.slot_id === x.id).length }))); },
+    async bookVisit(cid, slot, note, apt, source = 'resident') {
+      db = load(); const c = db.campaigns.find(x => x.id === cid); const a = apt ? db.apartments.find(x => x.id === apt) : myApt();
+      if (source === 'resident' && (c.status !== 'open' || (c.respond_until && new Date(c.respond_until) < new Date()))) fail('campaign_closed');
+      if (!inCamp(c, a)) fail('not_eligible');
+      if (slot) { const x = db.slots.find(y => y.id === slot && y.campaign_id === cid); if (!x) fail('slot_not_found'); if (db.bookings.filter(b => b.slot_id === slot && b.apartment_id !== a.id).length >= x.capacity) fail('slot_full'); }
+      db.bookings = db.bookings.filter(b => !(b.campaign_id === cid && b.apartment_id === a.id));
+      db.bookings.push({ id: db.seq++, campaign_id: cid, slot_id: slot, apartment_id: a.id, unavailable: !slot, note: note || null, source, updated_at: now() });
+      save(db); return delay();
+    },
+    async cancelVisit(cid) { db = load(); const a = myApt(); db.bookings = db.bookings.filter(b => !(b.campaign_id === cid && b.apartment_id === a.id)); save(db); return delay(); },
+    async saveCampaign(c, slots) {
+      db = load(); let v;
+      if (c.id) { v = db.campaigns.find(x => x.id === c.id); Object.assign(v, c); } else { v = { status: 'draft', translations: {}, ...c, id: db.seq++, created_at: now() }; db.campaigns.unshift(v); }
+      if (slots) {
+        const keep = slots.filter(x => x.id).map(x => x.id);
+        db.slots.filter(x => x.campaign_id === v.id && !keep.includes(x.id)).forEach(x => db.bookings.forEach(b => { if (b.slot_id === x.id) b.slot_id = null; }));
+        db.slots = db.slots.filter(x => x.campaign_id !== v.id || keep.includes(x.id));
+        slots.filter(x => !x.id).forEach(x => db.slots.push({ ...x, id: db.seq++, campaign_id: v.id }));
+      }
+      save(db); return delay(v);
+    },
+    async setCampaignStatus(id, status) { db = load(); const c = db.campaigns.find(x => x.id === id); if (status === 'open' && !db.slots.some(x => x.campaign_id === id)) fail('campaign_without_slots'); c.status = status; save(db); return delay(c); },
+    async visitSchedule(id) { db = load(); const c = db.campaigns.find(x => x.id === id); return delay(db.apartments.filter(a => inCamp(c, a)).map(a => { const b = db.bookings.find(x => x.campaign_id === id && x.apartment_id === a.id); return { apartment_id: a.id, entrance: a.entrance, number: a.number, floor: a.floor, slot_id: b?.slot_id || null, unavailable: !!b?.unavailable, note: b?.note || null, source: b?.source || null }; })); },
+    async staffBookVisit(cid, slot, apt, note) { return this.bookVisit(cid, slot, note, apt, 'staff'); },
+    async staffClearVisit(cid, apt) { db = load(); db.bookings = db.bookings.filter(b => !(b.campaign_id === cid && b.apartment_id === apt)); save(db); return delay(); },
     async staff() { db = load(); return delay(db.staff); },
     async updateStaff(id, p) { db = load(); Object.assign(db.staff.find(s => s.user_id === id), p); save(db); return delay(); },
     async apartments() { db = load(); return delay(db.apartments); },

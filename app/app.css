@@ -254,3 +254,17 @@ h1, h2, h3 { margin: 0; }
 .outcome { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 10px; }
 .outcome.ok { color: var(--st-resolved); }
 .outcome.ko { color: var(--pr-urgent); }
+
+/* ---------- prise de rendez-vous ---------- */
+.slot-day { margin-bottom: 14px; }
+.slot-day h3 { font-size: var(--fs-sm); font-weight: 600; color: var(--ink-2); margin: 0 0 8px; text-transform: capitalize; }
+.slot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+.slot { position: relative; display: grid; gap: 2px; padding: 12px 14px; border-radius: var(--r-sm); border: 1px solid var(--line-2); background: var(--white); cursor: pointer; }
+.slot input { position: absolute; opacity: 0; pointer-events: none; }
+.slot b { font-size: var(--fs-base); font-variant-numeric: tabular-nums; }
+.slot small { color: var(--ink-3); font-size: var(--fs-xs); }
+.slot:has(input:checked) { border-color: var(--gold-500); background: #FFFCF3; box-shadow: var(--ring); }
+.slot:has(input:focus-visible) { outline: 2px solid var(--night-800); outline-offset: 2px; }
+.slot.full { opacity: .5; cursor: not-allowed; background: var(--paper-2, #F3F1EC); }
+.slot-none { margin-top: 4px; }
+.slot-none b { font-size: var(--fs-sm); font-weight: 600; }

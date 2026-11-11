@@ -17,6 +17,7 @@ const S = {
   login: { entrance: null, error: '', busy: false },
   draft: null, sent: null, installEvt: null, unsub: null,
   votes: null, votesError: null, ballots: [], proxies: [], summaries: {}, picks: {},
+  visits: null, visitsError: null, visitBookings: [], visitCounts: {}, visitPicks: {}, visitNotes: {},
 };
 let api;
 
@@ -79,8 +80,18 @@ async function loadVotes() {
 async function loadSummary(id) {
   try { S.summaries[id] = await api.voteSummary(id); } catch { S.summaries[id] = { hidden: true }; }
 }
+async function loadVisits() {
+  try {
+    const [c, b] = await Promise.all([api.visitCampaigns(), api.myVisitBookings()]);
+    S.visits = c; S.visitBookings = b; S.visitsError = null;
+  } catch (e) { S.visitsError = e; if (!S.visits) S.visits = []; }
+}
+async function loadVisitCounts(id) {
+  try { const rows = await api.visitSlotCounts(id); S.visitCounts[id] = Object.fromEntries(rows.map(r => [r.slot_id, r.booked])); }
+  catch { S.visitCounts[id] = {}; }
+}
 async function loadAll() {
-  await Promise.all([loadTickets(), loadAnnouncements(), loadDirectory(), loadVotes(), api.towers().then(x => { S.towers = x; }).catch(() => {})]);
+  await Promise.all([loadTickets(), loadAnnouncements(), loadDirectory(), loadVotes(), loadVisits(), api.towers().then(x => { S.towers = x; }).catch(() => {})]);
   render();
 }
 async function loadShabbat() {
@@ -113,9 +124,11 @@ function render() {
   else if (r.name === 'directory') body = viewDirectory();
   else if (r.name === 'votes' && r.id) body = viewVoteDetail(r.id);
   else if (r.name === 'votes') body = viewVotes();
+  else if (r.name === 'visits' && r.id) body = viewVisitDetail(r.id);
+  else if (r.name === 'visits') body = viewVisits();
   else if (r.name === 'building') body = viewBuilding();
   else body = viewHome();
-  const tab = r.name === 'new' ? 'new' : r.name === 'votes' ? 'building' : ['requests', 'directory', 'building'].includes(r.name) ? r.name : 'home';
+  const tab = r.name === 'new' ? 'new' : ['votes', 'visits'].includes(r.name) ? 'building' : ['requests', 'directory', 'building'].includes(r.name) ? r.name : 'home';
   root.innerHTML = `<div class="shell">
     ${topbar()}
     ${S.online ? '' : `<div class="offline-bar" role="status">${icon('alert', 'ic-sm')}<span>${t('offline')}</span></div>`}
@@ -262,6 +275,7 @@ function viewHome() {
           ? `<div class="req-list">${open.slice(0, 3).map(reqCard).join('')}</div>`
           : emptyState('inbox', t('noOpen'), t('noOpenText')), 'tickets')}
       </section>
+      ${homeVisits()}
       ${homeVotes()}
       <section class="section">
         <div class="section-head"><h2>${t('services')}</h2></div>
@@ -686,6 +700,75 @@ function proxySheet() {
   });
 }
 
+/* ---------- prise de rendez-vous ---------- */
+const campText = (c) => ({ title: c.translations?.[S.lang]?.title || c.title, body: c.translations?.[S.lang]?.body || c.body });
+const campOpen = (c) => c.status === 'open' && (!c.respond_until || new Date(c.respond_until) > new Date());
+const myVisit = (id) => S.visitBookings.find(b => b.campaign_id === id);
+const visitAnswered = (c) => { const b = myVisit(c.id); return !!b && (b.unavailable || !!b.slot_id); };
+const slotDay = (x) => fmtDate(x.starts_at, S.lang, { weekday: 'long', day: 'numeric', month: 'long' });
+const slotTime = (x) => `${fmtDate(x.starts_at, S.lang, { hour: '2-digit', minute: '2-digit', hour12: false })}–${fmtDate(x.ends_at, S.lang, { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+const slotFull = (x) => `${slotDay(x)} · <bdi>${slotTime(x)}</bdi>`;
+
+function homeVisits() {
+  if (!S.visits) return '';
+  const todo = S.visits.filter(c => campOpen(c) && !visitAnswered(c));
+  const booked = S.visits.filter(c => c.status === 'open' && myVisit(c.id)?.slot_id && (c.visit_slots || []).some(x => x.id === myVisit(c.id).slot_id && new Date(x.ends_at) > new Date()));
+  if (!todo.length && !booked.length) return '';
+  return `<section class="section"><div class="section-head"><h2>${t('visits')}</h2><button class="link-btn" data-act="goto" data-href="#/visits">${t('seeAll')}</button></div>
+    ${[...todo, ...booked].map(visitCard).join('')}</section>`;
+}
+function visitCard(c) {
+  const b = myVisit(c.id), slot = b?.slot_id && (c.visit_slots || []).find(x => x.id === b.slot_id);
+  const sub = slot ? t('yourSlot', { d: slotFull(slot) }) : campOpen(c) ? (c.respond_until ? t('respondBy', { d: esc(fmtDateTime(c.respond_until, S.lang)) }) : t('chooseSlot')) : t('visitClosed');
+  const badge = slot ? `<span class="badge st-resolved">${t('visitChosen')}</span>` : b?.unavailable ? `<span class="badge st-waiting">${t('visitUnavailableShort')}</span>` : campOpen(c) ? `<span class="badge st-in_progress">${t('visitToChoose')}</span>` : '';
+  return `<button class="vote-card${!slot && !b?.unavailable && campOpen(c) ? ' ask' : ''}" data-act="goto" data-href="#/visits/${c.id}">${icon('calendar')}
+    <span><strong>${esc(campText(c).title)}</strong><small>${sub}</small></span>${badge}</button>`;
+}
+function viewVisits() {
+  if (!S.visits) { loadVisits().then(render); return `<div class="page"><div class="skel" style="height:200px;margin-top:24px"></div></div>`; }
+  const list = S.visits.filter(c => c.status !== 'cancelled');
+  return `<div class="page">
+    <div class="page-head"><h1>${t('visits')}</h1><p>${t('visitsLead')}</p></div>
+    ${S.visitsError ? listState(null, S.visitsError, () => '', 'visits') : ''}
+    <section class="section">${list.length ? list.map(visitCard).join('') : emptyState('calendar', t('noVisits'), t('noVisitsText'))}</section>
+  </div>`;
+}
+function viewVisitDetail(id) {
+  if (!S.visits) { loadVisits().then(render); return `<div class="page"><div class="skel" style="height:240px;margin-top:24px"></div></div>`; }
+  const c = S.visits.find(x => x.id === id);
+  if (!c) return `<div class="page">${emptyState('calendar', t('noVisits'), '')}</div>`;
+  if (S.visitCounts[id] === undefined) { S.visitCounts[id] = null; loadVisitCounts(id).then(render); }
+  const counts = S.visitCounts[id] || {};
+  const { title, body } = campText(c);
+  const open = campOpen(c), b = myVisit(id);
+  const slots = (c.visit_slots || []).filter(x => new Date(x.ends_at) > new Date() || x.id === b?.slot_id);
+  const saved = b ? (b.unavailable ? 'none' : b.slot_id || null) : null;
+  const pick = S.visitPicks[id] ?? saved;
+  const days = []; for (const x of slots) { const d = slotDay(x); let g = days.find(y => y.d === d); if (!g) days.push(g = { d, items: [] }); g.items.push(x); }
+  const status = b?.slot_id ? `<div class="banner banner-ok" role="status">${icon('check', 'ic-sm')}<div>${t('yourSlot', { d: slotFull(slots.find(x => x.id === b.slot_id) || (c.visit_slots || []).find(x => x.id === b.slot_id)) })}${b.source === 'staff' ? `<br><small>${t('visitBookedByStaff')}</small>` : ''}</div></div>`
+    : b?.unavailable ? `<div class="banner banner-warn" role="status">${icon('alert', 'ic-sm')}<div>${t('youSaidUnavailable')}</div></div>`
+    : b ? `<div class="banner banner-warn" role="status">${icon('alert', 'ic-sm')}<div>${t('slotRemoved')}</div></div>` : '';
+  return `<div class="page">
+    <div class="detail-head"><button class="back" data-act="goto" data-href="#/visits">${icon('chevron-left', 'flip-rtl')}${t('visits')}</button>
+      <h1>${esc(title)}</h1>
+      <div class="row">${open ? (c.respond_until ? `<span class="badge st-in_progress">${t('respondBy', { d: esc(fmtDateTime(c.respond_until, S.lang)) })}</span>` : '') : `<span class="badge st-closed">${t('visitClosed')}</span>`}</div></div>
+    ${body ? `<div class="panel" style="white-space:pre-wrap;margin-top:12px">${esc(body)}</div>` : ''}
+    <div style="margin-top:12px">${status}</div>
+    ${open ? `<form class="visit-form" data-form="visit" data-id="${id}">
+      <section class="section"><div class="section-head"><h2>${t('chooseSlot')}</h2></div>
+        ${days.map(g => `<div class="slot-day"><h3>${esc(g.d)}</h3><div class="slot-grid" role="radiogroup">${g.items.map(x => {
+          const used = counts[x.id] || 0, left = x.capacity - used + (saved === x.id ? 1 : 0), full = left <= 0;
+          return `<label class="slot${full ? ' full' : ''}"><input type="radio" name="slot" value="${x.id}" data-vpick="${id}" ${pick === x.id ? 'checked' : ''} ${full ? 'disabled' : ''}>
+            <b><bdi>${slotTime(x)}</bdi></b><small>${saved === x.id ? t('visitChosen') : full ? t('slotFullLabel') : t('slotsLeft', { n: left })}</small></label>`; }).join('')}</div></div>`).join('')}
+        <label class="slot slot-none"><input type="radio" name="slot" value="none" data-vpick="${id}" ${pick === 'none' ? 'checked' : ''}><b>${t('noSlotFits')}</b></label>
+      </section>
+      <div class="field"><label for="vNote">${t('visitNote')}</label><textarea class="textarea" id="vNote" name="note" maxlength="500" rows="2" placeholder="${t('visitNotePh')}" data-vnote="${id}">${esc(S.visitNotes[id] ?? b?.note ?? '')}</textarea></div>
+      <button class="btn btn-gold btn-block" type="submit">${icon('check', 'ic-sm')}${b ? t('changeSlot') : t('confirmSlot')}</button>
+      ${b ? `<button class="btn btn-ghost btn-block" type="button" style="margin-top:8px" data-act="visit-cancel" data-id="${id}">${t('visitCancel')}</button>` : ''}
+    </form>` : ''}
+  </div>`;
+}
+
 /* ---------- immeuble ---------- */
 function viewBuilding() {
   const tw = S.towers.find(x => x.id === S.apt.tower_id) || {};
@@ -701,7 +784,8 @@ function viewBuilding() {
     ${tw.notes ? `<div class="panel" style="margin-top:12px;white-space:pre-wrap">${esc(tw.notes)}</div>` : ''}
     <section class="section"><div class="section-head"><h2>${t('shabbat')}</h2></div><div style="background:var(--night-900);border-radius:var(--r-md);padding:2px 12px 12px">${shabbatBlock()}</div></section>
     <section class="section"><div class="section-head"><h2>${t('copro')}</h2></div>
-      <div class="info-list"><a class="info-row" href="#/votes">${icon('vote')}<span class="grow">${t('votes')}<small>${t('votesLead')}</small></span>${icon('chevron-right', 'flip-rtl')}</a></div>
+      <div class="info-list"><a class="info-row" href="#/visits">${icon('calendar')}<span class="grow">${t('visits')}<small>${t('visitsLead')}</small></span>${icon('chevron-right', 'flip-rtl')}</a>
+        <a class="info-row" href="#/votes">${icon('vote')}<span class="grow">${t('votes')}<small>${t('votesLead')}</small></span>${icon('chevron-right', 'flip-rtl')}</a></div>
     </section>
     <section class="section"><div class="section-head"><h2>${t('emergencyNumbers')}</h2></div>
       <div class="info-list">${emerg.map(([n, k, ic]) => `<a class="info-row" href="tel:${n}">${icon(ic)}<span class="grow">${t(k)}</span><span class="num">${n}</span></a>`).join('')}</div>
@@ -861,7 +945,7 @@ const actions = {
   account: () => accountSheet(),
   signout: async () => { closeSheet(); S.unsub?.(); S.unsub = null; await api.signOut(); Object.assign(S, { session: null, apt: null, tickets: null, announcements: null, directory: null, detail: null, draft: null, sent: null }); location.hash = ''; render(); },
   'req-tab': (el) => { S.reqTab = el.dataset.tab; render(); },
-  reload: async (el) => { const k = el.dataset.kind; if (k === 'tickets') { S.tickets = null; S.ticketsError = null; render(); await loadTickets(); } else if (k === 'ann') { S.announcements = null; S.annError = null; render(); await loadAnnouncements(); } else if (k === 'dir') { S.directory = null; S.dirError = null; render(); await loadDirectory(); } else if (k === 'votes') { await loadVotes(); } else { S.detail = null; S.detailError = null; } render(); },
+  reload: async (el) => { const k = el.dataset.kind; if (k === 'tickets') { S.tickets = null; S.ticketsError = null; render(); await loadTickets(); } else if (k === 'ann') { S.announcements = null; S.annError = null; render(); await loadAnnouncements(); } else if (k === 'dir') { S.directory = null; S.dirError = null; render(); await loadDirectory(); } else if (k === 'votes') { await loadVotes(); } else if (k === 'visits') { await loadVisits(); } else { S.detail = null; S.detailError = null; } render(); },
   loc: (el) => { captureDraft(); S.draft.location = el.dataset.loc; S.draft.area = el.dataset.loc === 'apartment' ? 'apartment' : ''; render(); },
   area: (el) => { captureDraft(); S.draft.area = el.dataset.area; S.draft.errors.area = false; render(); },
   cat: (el) => {
@@ -888,6 +972,7 @@ const actions = {
   },
   'close-sheet': () => closeSheet(),
   'proxy-form': () => proxySheet(),
+  'visit-cancel': async (el) => { const id = Number(el.dataset.id); try { await api.cancelVisit(id); toast(t('visitCancelled')); delete S.visitPicks[id]; delete S.visitNotes[id]; delete S.visitCounts[id]; await loadVisits(); render(); } catch (e) { toast(errMsg(e), 'error'); } },
   'proxy-accept': async (el) => { try { await api.respondProxy(Number(el.dataset.id), true); toast(t('proxyAccepted')); await loadVotes(); render(); } catch (e) { toast(errMsg(e), 'error'); } },
   'proxy-refuse': async (el) => { try { await api.respondProxy(Number(el.dataset.id), false); toast(t('proxyRefused')); await loadVotes(); render(); } catch (e) { toast(errMsg(e), 'error'); } },
   'proxy-revoke': async (el) => { if (!confirm(t('revokeConfirm'))) return; try { await api.revokeProxy(Number(el.dataset.id)); toast(t('proxyRevoked')); await loadVotes(); render(); } catch (e) { toast(errMsg(e), 'error'); } },
@@ -900,6 +985,7 @@ document.addEventListener('click', (e) => {
   actions[el.dataset.act](el, e);
 });
 document.addEventListener('input', (e) => {
+  if (e.target.dataset?.vnote) { S.visitNotes[e.target.dataset.vnote] = e.target.value; return; }
   if (e.target.id === 'dirQ') {
     S.dirQuery = e.target.value;
     const box = $('#dirResults');
@@ -909,6 +995,7 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', async (e) => {
   if (e.target.dataset?.pick) { S.picks[e.target.dataset.pick] = Number(e.target.value); return; }
+  if (e.target.dataset?.vpick) { S.visitPicks[e.target.dataset.vpick] = e.target.value === 'none' ? 'none' : Number(e.target.value); return; }
   if (e.target.dataset?.actChange === 'detail-photo' && e.target.files[0]) {
     const id = Number(e.target.dataset.id);
     try { await api.addPhoto(id, e.target.files[0]); await loadDetail(id); render(); } catch (x) { toast(errMsg(x), 'error'); }
@@ -923,6 +1010,15 @@ document.addEventListener('submit', async (e) => {
     const vote = Number(f.dataset.vote);
     try { await api.castBallot(vote, Number(opt.value), f.dataset.apt ? Number(f.dataset.apt) : null); toast(t('voteSaved')); delete S.picks[`${vote}:${f.dataset.apt || 'me'}`]; delete S.summaries[vote]; await loadVotes(); render(); }
     catch (x) { toast(errMsg(x), 'error'); btn.disabled = false; }
+    return;
+  }
+  if (f.dataset?.form === 'visit') {
+    e.preventDefault();
+    const pick = f.querySelector('input[name=slot]:checked'); if (!pick) { toast(t('chooseSlot'), 'error'); return; }
+    const btn = f.querySelector('[type=submit]'); btn.disabled = true;
+    const id = Number(f.dataset.id);
+    try { await api.bookVisit(id, pick.value === 'none' ? null : Number(pick.value), f.note.value.trim()); toast(t('visitSaved')); delete S.visitPicks[id]; delete S.visitNotes[id]; delete S.visitCounts[id]; await loadVisits(); render(); window.scrollTo(0, 0); }
+    catch (x) { toast(errMsg(x), 'error'); btn.disabled = false; delete S.visitCounts[id]; if (errorKey(x) === 'slot_full') render(); }
     return;
   }
   if (f.dataset?.form === 'comment') {
