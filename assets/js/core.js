@@ -150,7 +150,7 @@ export function createApi(storageKey) {
       return must(await sb.auth.signInWithPassword({ email: apartmentEmail(towerId, number), password: pin }));
     },
     async signInStaff(email, password) { return must(await sb.auth.signInWithPassword({ email, password })); },
-    async signUpStaff(email, password) { return must(await sb.auth.signUp({ email, password })); },
+    async signUpStaff(email, password) { return must(await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } })); },
     async changeSecret(secret) { return must(await sb.auth.updateUser({ password: secret })); },
     async signOut() { await sb.auth.signOut(); },
 
