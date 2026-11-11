@@ -3,7 +3,7 @@ import { T } from './i18n.js';
 import { icon } from '../assets/ds/icons.js';
 import {
   CATEGORIES, STATUSES, TRADES, OPEN_STATUSES, RESIDENT_STEPS, label, iconOf,
-  AREAS, COMMON_AREAS, ENTRANCES, CATEGORY_AREA, MUNICIPAL_106, isParking, devicePlatform,
+  AREAS, COMMON_AREAS, ENTRANCES, CATEGORY_AREA, MUNICIPAL_106, isParking, devicePlatform, VOTE_RULES, optionText,
   esc, $, $$, fmtDate, fmtDateTime, relTime, toast, errorKey, createApi,
 } from '../assets/js/core.js';
 
@@ -16,6 +16,7 @@ const S = {
   shabbat: null, shabbatError: false, online: navigator.onLine,
   login: { entrance: null, error: '', busy: false },
   draft: null, sent: null, installEvt: null, unsub: null,
+  votes: null, votesError: null, ballots: [], proxies: [], summaries: {}, picks: {},
 };
 let api;
 
@@ -69,8 +70,17 @@ async function loadDetail(id) {
     S.photoUrls = await api.photoUrls(S.detail.photos.map(p => p.path)).catch(() => ({}));
   } catch (e) { S.detailError = e; }
 }
+async function loadVotes() {
+  try {
+    const [v, b, p] = await Promise.all([api.votes(), api.myBallots(), api.myProxies()]);
+    S.votes = v; S.ballots = b; S.proxies = p; S.votesError = null;
+  } catch (e) { S.votesError = e; if (!S.votes) S.votes = []; }
+}
+async function loadSummary(id) {
+  try { S.summaries[id] = await api.voteSummary(id); } catch { S.summaries[id] = { hidden: true }; }
+}
 async function loadAll() {
-  await Promise.all([loadTickets(), loadAnnouncements(), loadDirectory(), api.towers().then(x => { S.towers = x; }).catch(() => {})]);
+  await Promise.all([loadTickets(), loadAnnouncements(), loadDirectory(), loadVotes(), api.towers().then(x => { S.towers = x; }).catch(() => {})]);
   render();
 }
 async function loadShabbat() {
@@ -101,9 +111,11 @@ function render() {
   else if (r.name === 'requests') body = viewRequests();
   else if (r.name === 'new') body = S.sent ? viewSent() : viewNew();
   else if (r.name === 'directory') body = viewDirectory();
+  else if (r.name === 'votes' && r.id) body = viewVoteDetail(r.id);
+  else if (r.name === 'votes') body = viewVotes();
   else if (r.name === 'building') body = viewBuilding();
   else body = viewHome();
-  const tab = r.name === 'new' ? 'new' : ['requests', 'directory', 'building'].includes(r.name) ? r.name : 'home';
+  const tab = r.name === 'new' ? 'new' : r.name === 'votes' ? 'building' : ['requests', 'directory', 'building'].includes(r.name) ? r.name : 'home';
   root.innerHTML = `<div class="shell">
     ${topbar()}
     ${S.online ? '' : `<div class="offline-bar" role="status">${icon('alert', 'ic-sm')}<span>${t('offline')}</span></div>`}
@@ -250,6 +262,7 @@ function viewHome() {
           ? `<div class="req-list">${open.slice(0, 3).map(reqCard).join('')}</div>`
           : emptyState('inbox', t('noOpen'), t('noOpenText')), 'tickets')}
       </section>
+      ${homeVotes()}
       <section class="section">
         <div class="section-head"><h2>${t('services')}</h2></div>
         <div class="services">
@@ -536,6 +549,143 @@ function proRow(e) {
   </article>`;
 }
 
+/* ---------- votes de la copropriété ---------- */
+const aptFromLabel = (l) => { const m = /^E(\d+)-(.+)$/.exec(l || ''); return m ? `${t('entranceN', { n: m[1] })} · ${t('aptShort', { n: esc(m[2]) })}` : esc(l || ''); };
+const voteText = (v) => ({ title: v.translations?.[S.lang]?.title || v.title, body: v.translations?.[S.lang]?.body || v.body });
+const isOpen = (v) => v.status === 'open' && (!v.opens_at || new Date(v.opens_at) <= new Date()) && (!v.closes_at || new Date(v.closes_at) > new Date());
+const myBallot = (voteId, apt = S.apt.id) => S.ballots.find(b => b.vote_id === voteId && b.apartment_id === apt);
+const heldProxies = (voteId) => S.proxies.filter(p => p.direction === 'received' && p.status === 'active' && (!p.vote_id || p.vote_id === voteId) && (!p.valid_until || new Date(p.valid_until) > new Date()));
+
+function homeVotes() {
+  if (!S.votes) return '';
+  const open = S.votes.filter(isOpen);
+  const asks = S.proxies.filter(p => p.direction === 'received' && p.status === 'pending');
+  if (!open.length && !asks.length) return '';
+  return `<section class="section"><div class="section-head"><h2>${t('votes')}</h2><button class="link-btn" data-act="goto" data-href="#/votes">${t('seeAll')}</button></div>
+    ${asks.length ? `<button class="vote-card ask" data-act="goto" data-href="#/votes">${icon('users')}<span><strong>${t('proxyAsks', { n: asks.length })}</strong><small>${t('proxyAsksHint')}</small></span>${icon('chevron-right', 'flip-rtl')}</button>` : ''}
+    ${open.map(voteCard).join('')}</section>`;
+}
+function voteCard(v) {
+  const b = myBallot(v.id), o = b && (v.vote_options || []).find(x => x.id === b.option_id);
+  const { title } = voteText(v);
+  return `<button class="vote-card" data-act="goto" data-href="#/votes/${v.id}">${icon('vote')}
+    <span><strong>${esc(title)}</strong><small>${isOpen(v) ? (v.closes_at ? t('closesOn', { d: esc(fmtDateTime(v.closes_at, S.lang)) }) : t('voteOpen')) : t('voteClosedOn', { d: esc(fmtDate(v.closed_at || v.closes_at, S.lang, { day: 'numeric', month: 'long', year: 'numeric' })) })}</small></span>
+    ${isOpen(v) ? (b ? `<span class="badge st-resolved">${t('voted')}</span>` : `<span class="badge st-progress st-in_progress">${t('toVote')}</span>`) : voteOutcomeBadge(v)}
+  </button>`;
+}
+function voteOutcomeBadge(v) {
+  const s = S.summaries[v.id];
+  if (s === undefined) { loadSummary(v.id).then(render); return ''; }
+  if (!s || s.hidden) return '';
+  if (s.passed === true) return `<span class="badge st-resolved">${t('adopted')}</span>`;
+  if (s.passed === false) return `<span class="badge st-cancelled">${t('notAdopted')}</span>`;
+  return `<span class="badge st-closed">${t('results')}</span>`;
+}
+function proxyRow(p) {
+  const who = aptFromLabel(p.other_label);
+  const pv = p.vote_id && (S.votes || []).find(v => v.id === p.vote_id);
+  const scope = p.vote_id ? esc(pv ? voteText(pv).title : (p.vote_title || '')) : (p.valid_until ? t('allVotesUntil', { d: esc(fmtDate(p.valid_until, S.lang, { day: 'numeric', month: 'long', year: 'numeric' })) }) : t('allVotes'));
+  const st = { pending: p.direction === 'given' ? t('pp_pending_given') : t('pp_pending_received'), awaiting_approval: t('pp_awaiting'), active: t('pp_active'), rejected: t('pp_rejected') }[p.status];
+  const badge = { pending: 'st-new', awaiting_approval: 'st-waiting', active: 'st-resolved', rejected: 'st-cancelled' }[p.status];
+  const acts = p.direction === 'received' && p.status === 'pending'
+    ? `<button class="btn btn-gold btn-sm" data-act="proxy-accept" data-id="${p.id}">${t('accept')}</button><button class="btn btn-line btn-sm" data-act="proxy-refuse" data-id="${p.id}">${t('refuse')}</button>`
+    : p.direction === 'given' && p.status !== 'rejected' ? `<button class="btn btn-ghost btn-sm" data-act="proxy-revoke" data-id="${p.id}">${t('revoke')}</button>` : '';
+  return `<div class="proxy-row"><div class="pr-main"><strong>${p.direction === 'given' ? t('givenTo', { apt: who }) : t('receivedFrom', { apt: who })}</strong>
+      <small>${scope}</small>${p.rejected_reason ? `<small class="form-error" style="margin:2px 0 0">${esc(p.rejected_reason)}</small>` : ''}</div>
+    <span class="badge ${badge}">${st}</span>${acts ? `<div class="btn-row" style="grid-column:1/-1">${acts}</div>` : ''}</div>`;
+}
+function viewVotes() {
+  if (!S.votes) { loadVotes().then(render); return `<div class="page"><div class="skel" style="height:200px;margin-top:24px"></div></div>`; }
+  const open = S.votes.filter(isOpen), closed = S.votes.filter(v => !isOpen(v) && v.status !== 'draft');
+  return `<div class="page">
+    <div class="page-head"><h1>${t('votes')}</h1><p>${t('votesLead')}</p></div>
+    ${S.votesError ? listState(null, S.votesError, () => '', 'votes') : ''}
+    <section class="section"><div class="section-head"><h2>${t('openVotes')}</h2></div>
+      ${open.length ? open.map(voteCard).join('') : emptyState('vote', t('noOpenVotes'), t('noOpenVotesText'))}</section>
+    <section class="section"><div class="section-head"><h2>${t('proxies')}</h2><button class="link-btn" data-act="proxy-form">${icon('plus', 'ic-sm')}${t('giveProxy')}</button></div>
+      <p class="hint" style="margin:-4px 0 12px">${t('proxyHow')}</p>
+      ${S.proxies.length ? `<div class="panel" style="padding:4px 16px">${S.proxies.map(proxyRow).join('')}</div>` : emptyState('users', t('noProxies'), t('noProxiesText'))}</section>
+    ${closed.length ? `<section class="section"><div class="section-head"><h2>${t('closedVotes')}</h2></div>${closed.map(voteCard).join('')}</section>` : ''}
+  </div>`;
+}
+function ballotForm(v, apartment, label, saved) {
+  const opts = v.vote_options || [];
+  const key = `${v.id}:${apartment || 'me'}`;
+  const current = S.picks[key] ?? saved;
+  return `<form class="ballot" data-form="ballot" data-vote="${v.id}" data-apt="${apartment || ''}">
+    ${label ? `<div class="ballot-for">${label}</div>` : ''}
+    <div class="ballot-opts" role="radiogroup">${opts.map(o => `<label class="ballot-opt k-${o.kind}"><input type="radio" name="opt" value="${o.id}" data-pick="${key}" ${current === o.id ? 'checked' : ''} required><span>${esc(optionText(o, S.lang))}</span></label>`).join('')}</div>
+    <button class="btn btn-night btn-block" type="submit">${icon('check', 'ic-sm')}${saved ? t('changeVote') : t('castVote')}</button>
+  </form>`;
+}
+function resultsBlock(v) {
+  const s = S.summaries[v.id];
+  if (s === undefined) { loadSummary(v.id).then(render); return `<div class="skel" style="height:120px"></div>`; }
+  if (!s || s.hidden) return `<p class="hint">${t('resultsHidden')}</p>`;
+  const total = Math.max(Number(s.cast_weight) || 0, 0.0001);
+  return `<div class="panel">
+    ${s.passed === true ? `<div class="outcome ok">${icon('check')}${t('adopted')}</div>` : s.passed === false ? `<div class="outcome ko">${icon('x')}${t('notAdopted')}</div>` : ''}
+    ${s.options.map(o => `<div class="res-row"><span>${esc(optionText(o, S.lang))}</span><span class="bar"><i style="width:${(Number(o.weight) / total) * 100}%"></i></span><b>${o.count}</b></div>`).join('')}
+    <p class="hint" style="margin:10px 0 0">${t('participation', { n: s.cast_count, m: s.eligible_count })} · ${L(VOTE_RULES, s.rule)}${s.weighted ? ' · ' + t('weightedNote') : ''}</p>
+  </div>`;
+}
+function viewVoteDetail(id) {
+  if (!S.votes) { loadVotes().then(render); return `<div class="page"><div class="skel" style="height:240px;margin-top:24px"></div></div>`; }
+  const v = S.votes.find(x => x.id === id);
+  if (!v) return `<div class="page">${emptyState('vote', t('noOpenVotes'), '')}</div>`;
+  const { title, body } = voteText(v);
+  const open = isOpen(v), mine = myBallot(v.id);
+  const held = open && v.allow_proxies ? heldProxies(v.id) : [];
+  return `<div class="page">
+    <div class="detail-head"><button class="back" data-act="goto" data-href="#/votes">${icon('chevron-left', 'flip-rtl')}${t('votes')}</button>
+      <h1>${esc(title)}</h1>
+      <div class="row">${open ? `<span class="badge st-in_progress">${t('voteOpen')}</span>` : `<span class="badge st-closed">${t('voteClosed')}</span>`}
+        ${v.secret ? `<span class="badge no-dot st-assigned">${t('secretNote')}</span>` : ''}</div></div>
+    ${body ? `<div class="panel" style="white-space:pre-wrap;margin-top:12px">${esc(body)}</div>` : ''}
+    <dl class="facts panel" style="margin-top:12px">
+      <div><dt>${t('ruleLabel')}</dt><dd>${L(VOTE_RULES, v.rule)}${v.weighted ? `<br><small style="font-weight:400;color:var(--ink-3)">${t('weightedNote')}</small>` : ''}</dd></div>
+      <div><dt>${open ? t('closesLabel') : t('voteClosed')}</dt><dd>${(open ? v.closes_at : (v.closed_at || v.closes_at)) ? esc(fmtDateTime(open ? v.closes_at : (v.closed_at || v.closes_at), S.lang)) : '—'}</dd></div>
+    </dl>
+    ${open ? `<section class="section"><div class="section-head"><h2>${t('myVote')}</h2></div>
+      ${mine && mine.method !== 'direct' ? `<p class="hint">${t(mine.method === 'proxy' ? 'votedByProxy' : 'votedAtAssembly')}</p>` : ''}
+      ${ballotForm(v, null, '', mine?.option_id)}</section>` : ''}
+    ${held.length ? `<section class="section"><div class="section-head"><h2>${t('onBehalfOf')}</h2></div>
+      ${held.map(p => ballotForm(v, p.other_apartment, t('voteFor', { apt: aptFromLabel(p.other_label) }), myBallot(v.id, p.other_apartment)?.option_id)).join('')}</section>` : ''}
+    <section class="section"><div class="section-head"><h2>${t('results')}</h2></div>${resultsBlock(v)}</section>
+  </div>`;
+}
+function proxySheet() {
+  const open = (S.votes || []).filter(v => isOpen(v) && v.allow_proxies);
+  openSheet(t('giveProxy'), `<form id="proxyForm" novalidate>
+    <p class="hint" style="margin-top:0">${t('proxyHow')}</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="field"><label for="pxE">${t('entrance')}</label><select class="select" id="pxE">${ENTRANCES.map(e => `<option value="${e.id}">${t('entranceN', { n: e.id })}</option>`).join('')}</select></div>
+      <div class="field"><label for="pxN">${t('apartment')}</label><input class="input" id="pxN" inputmode="numeric" maxlength="5" required></div>
+    </div>
+    <div class="field"><span class="label">${t('proxyScope')}</span>
+      <div class="seg" role="group" style="width:100%"><button type="button" data-px="vote" aria-pressed="${open.length ? 'true' : 'false'}" ${open.length ? '' : 'disabled'}>${t('proxyThisVote')}</button><button type="button" data-px="all" aria-pressed="${open.length ? 'false' : 'true'}">${t('proxyAllVotes')}</button></div></div>
+    <div class="field" id="pxVoteRow" ${open.length ? '' : 'hidden'}><label for="pxV">${t('votes')}</label><select class="select" id="pxV">${open.map(v => `<option value="${v.id}">${esc(voteText(v).title)}</option>`).join('')}</select></div>
+    <div class="field" id="pxUntilRow" ${open.length ? 'hidden' : ''}><label for="pxU">${t('proxyUntil')}</label><input class="input" type="date" id="pxU"></div>
+    <p class="form-error" id="pxErr" role="alert"></p>
+    <button class="btn btn-gold btn-block" type="submit">${icon('send', 'ic-sm flip-rtl')}${t('sendProxy')}</button></form>`, (ov) => {
+    let mode = open.length ? 'vote' : 'all';
+    $$('[data-px]', ov).forEach(b => b.addEventListener('click', () => {
+      mode = b.dataset.px; $$('[data-px]', ov).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      $('#pxVoteRow', ov).hidden = mode !== 'vote'; $('#pxUntilRow', ov).hidden = mode !== 'all';
+    }));
+    $('#proxyForm', ov).addEventListener('submit', async (e) => {
+      e.preventDefault(); const err = $('#pxErr', ov); err.textContent = '';
+      const n = $('#pxN', ov).value.trim();
+      if (!/^[0-9]{1,4}[A-Za-z]?$/.test(n)) { err.textContent = t('apartment') + ' : ' + t('required'); return; }
+      const until = $('#pxU', ov).value ? new Date($('#pxU', ov).value + 'T23:59:00').toISOString() : null;
+      try {
+        await api.grantProxy($('#pxE', ov).value, n, mode === 'vote' ? Number($('#pxV', ov).value) : null, mode === 'all' ? until : null);
+        toast(t('proxySent')); closeSheet(); await loadVotes(); render();
+      } catch (x) { err.textContent = errMsg(x); }
+    });
+  });
+}
+
 /* ---------- immeuble ---------- */
 function viewBuilding() {
   const tw = S.towers.find(x => x.id === S.apt.tower_id) || {};
@@ -550,6 +700,9 @@ function viewBuilding() {
     </div>
     ${tw.notes ? `<div class="panel" style="margin-top:12px;white-space:pre-wrap">${esc(tw.notes)}</div>` : ''}
     <section class="section"><div class="section-head"><h2>${t('shabbat')}</h2></div><div style="background:var(--night-900);border-radius:var(--r-md);padding:2px 12px 12px">${shabbatBlock()}</div></section>
+    <section class="section"><div class="section-head"><h2>${t('copro')}</h2></div>
+      <div class="info-list"><a class="info-row" href="#/votes">${icon('vote')}<span class="grow">${t('votes')}<small>${t('votesLead')}</small></span>${icon('chevron-right', 'flip-rtl')}</a></div>
+    </section>
     <section class="section"><div class="section-head"><h2>${t('emergencyNumbers')}</h2></div>
       <div class="info-list">${emerg.map(([n, k, ic]) => `<a class="info-row" href="tel:${n}">${icon(ic)}<span class="grow">${t(k)}</span><span class="num">${n}</span></a>`).join('')}</div>
     </section>
@@ -708,7 +861,7 @@ const actions = {
   account: () => accountSheet(),
   signout: async () => { closeSheet(); S.unsub?.(); S.unsub = null; await api.signOut(); Object.assign(S, { session: null, apt: null, tickets: null, announcements: null, directory: null, detail: null, draft: null, sent: null }); location.hash = ''; render(); },
   'req-tab': (el) => { S.reqTab = el.dataset.tab; render(); },
-  reload: async (el) => { const k = el.dataset.kind; if (k === 'tickets') { S.tickets = null; S.ticketsError = null; render(); await loadTickets(); } else if (k === 'ann') { S.announcements = null; S.annError = null; render(); await loadAnnouncements(); } else if (k === 'dir') { S.directory = null; S.dirError = null; render(); await loadDirectory(); } else { S.detail = null; S.detailError = null; } render(); },
+  reload: async (el) => { const k = el.dataset.kind; if (k === 'tickets') { S.tickets = null; S.ticketsError = null; render(); await loadTickets(); } else if (k === 'ann') { S.announcements = null; S.annError = null; render(); await loadAnnouncements(); } else if (k === 'dir') { S.directory = null; S.dirError = null; render(); await loadDirectory(); } else if (k === 'votes') { await loadVotes(); } else { S.detail = null; S.detailError = null; } render(); },
   loc: (el) => { captureDraft(); S.draft.location = el.dataset.loc; S.draft.area = el.dataset.loc === 'apartment' ? 'apartment' : ''; render(); },
   area: (el) => { captureDraft(); S.draft.area = el.dataset.area; S.draft.errors.area = false; render(); },
   cat: (el) => {
@@ -734,6 +887,10 @@ const actions = {
     catch (e) { toast(errMsg(e), 'error'); }
   },
   'close-sheet': () => closeSheet(),
+  'proxy-form': () => proxySheet(),
+  'proxy-accept': async (el) => { try { await api.respondProxy(Number(el.dataset.id), true); toast(t('proxyAccepted')); await loadVotes(); render(); } catch (e) { toast(errMsg(e), 'error'); } },
+  'proxy-refuse': async (el) => { try { await api.respondProxy(Number(el.dataset.id), false); toast(t('proxyRefused')); await loadVotes(); render(); } catch (e) { toast(errMsg(e), 'error'); } },
+  'proxy-revoke': async (el) => { if (!confirm(t('revokeConfirm'))) return; try { await api.revokeProxy(Number(el.dataset.id)); toast(t('proxyRevoked')); await loadVotes(); render(); } catch (e) { toast(errMsg(e), 'error'); } },
   install: async () => { if (!S.installEvt) return; S.installEvt.prompt(); await S.installEvt.userChoice; S.installEvt = null; render(); },
 };
 document.addEventListener('click', (e) => {
@@ -751,6 +908,7 @@ document.addEventListener('input', (e) => {
   }
 });
 document.addEventListener('change', async (e) => {
+  if (e.target.dataset?.pick) { S.picks[e.target.dataset.pick] = Number(e.target.value); return; }
   if (e.target.dataset?.actChange === 'detail-photo' && e.target.files[0]) {
     const id = Number(e.target.dataset.id);
     try { await api.addPhoto(id, e.target.files[0]); await loadDetail(id); render(); } catch (x) { toast(errMsg(x), 'error'); }
@@ -758,6 +916,15 @@ document.addEventListener('change', async (e) => {
 });
 document.addEventListener('submit', async (e) => {
   const f = e.target;
+  if (f.dataset?.form === 'ballot') {
+    e.preventDefault();
+    const opt = f.querySelector('input[name=opt]:checked'); if (!opt) { toast(t('chooseOption'), 'error'); return; }
+    const btn = f.querySelector('[type=submit]'); btn.disabled = true;
+    const vote = Number(f.dataset.vote);
+    try { await api.castBallot(vote, Number(opt.value), f.dataset.apt ? Number(f.dataset.apt) : null); toast(t('voteSaved')); delete S.picks[`${vote}:${f.dataset.apt || 'me'}`]; delete S.summaries[vote]; await loadVotes(); render(); }
+    catch (x) { toast(errMsg(x), 'error'); btn.disabled = false; }
+    return;
+  }
   if (f.dataset?.form === 'comment') {
     e.preventDefault();
     const body = f.body.value.trim(); if (!body) return;

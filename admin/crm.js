@@ -3,7 +3,7 @@ import { icon } from '../assets/ds/icons.js';
 import { CONFIG } from '../assets/js/config.js';
 import {
   CATEGORIES, STATUSES, PRIORITIES, TRADES, OPEN_STATUSES, label, iconOf,
-  AREAS, COMMON_AREAS, ENTRANCES, CATEGORY_AREA, isParking, towerOfEntrance, entrancesOfTower,
+  AREAS, COMMON_AREAS, ENTRANCES, CATEGORY_AREA, isParking, towerOfEntrance, entrancesOfTower, VOTE_RULES,
   esc, $, $$, fmtDate, fmtDateTime, relTime, toast, errorKey, createApi,
 } from '../assets/js/core.js';
 
@@ -14,6 +14,9 @@ const ERR = {
   network: 'אין חיבור לשרת. בדקו את הרשת ונסו שוב.', session: 'פג תוקף ההתחברות. התחברו מחדש.',
   forbidden: 'אין לך הרשאה לפעולה זו.', duplicate: 'הרשומה כבר קיימת.', phone_consent: 'יש לאשר הסכמה לפרסום המספר.',
   cannot_cancel: 'לא ניתן לבטל.', unknown: 'אירעה שגיאה. נסו שוב.',
+  vote_closed: 'ההצבעה סגורה.', not_eligible: 'הדירה אינה משתתפת בהצבעה זו.', proxy_limit: 'מיופה הכוח הגיע למספר המרבי של ייפויי כוח בהצבעה זו.',
+  vote_locked: 'ההצבעה כבר נפתחה: הכללים והאפשרויות נעולים.', vote_without_options: 'לא ניתן לפתוח הצבעה ללא אפשרויות.', self_proxy: 'מייפה הכוח ומיופה הכוח זהים.',
+  proxy_not_awaiting: 'ייפוי הכוח כבר טופל.', owner_already_voted: 'הדירה כבר הצביעה בעצמה.', no_proxy: 'אין ייפוי כוח מאושר.',
 };
 const errMsg = (e) => {
   const m = String(e?.message || e || '');
@@ -27,7 +30,8 @@ const initials = (n) => (n || '?').trim().split(/\s+/).map(x => x[0]).slice(0, 2
 /* ------------------------------------------------------------------ état */
 const C = {
   session: null, me: null, bootstrap: false, authError: '', authBusy: false, authMode: 'login',
-  data: { tickets: null, staff: [], apartments: [], towers: [], vendors: [], interventions: [], announcements: [], directory: [], reports: [], legacy: null },
+  data: { tickets: null, staff: [], apartments: [], towers: [], vendors: [], interventions: [], announcements: [], directory: [], reports: [], legacy: null, votes: [], proxies: [] },
+  summaries: {},
   errors: {}, lastSync: null, live: false,
   page: 'dashboard', view: 'table', drawer: null, drawerData: null, photoUrls: {},
   f: { status: 'open', priority: '', place: '', area: '', category: '', assignee: '', q: '' },
@@ -49,6 +53,7 @@ const PAGES = [
   { key: 'buildings', icon: 'towers', label: 'בניינים ודירות' },
   { key: 'announcements', icon: 'megaphone', label: 'הודעות לדיירים' },
   { key: 'directory', icon: 'book', label: 'ספר בעלי מקצוע', count: () => C.data.reports.length || 0 },
+  { key: 'votes', icon: 'vote', label: 'הצבעות וייפויי כוח', count: () => C.data.proxies.filter(p => p.status === 'awaiting_approval').length, alert: () => C.data.proxies.some(p => p.status === 'awaiting_approval') },
   { group: 'ניהול' },
   { key: 'team', icon: 'users', label: 'צוות והרשאות' },
 ];
@@ -59,6 +64,7 @@ async function loadAll() {
     tickets: () => api.tickets({ limit: 2000 }), staff: () => api.staff(), apartments: () => api.apartments(),
     towers: () => api.towers(), vendors: () => api.vendors(), interventions: () => api.interventions(),
     announcements: () => api.announcements(), directory: () => api.directory(), reports: () => api.directoryReports(),
+    votes: () => api.votes(), proxies: () => api.proxies(),
   };
   const res = await Promise.allSettled(Object.values(jobs).map(f => f()));
   Object.keys(jobs).forEach((k, i) => {
@@ -195,6 +201,7 @@ function pageHtml() {
     case 'announcements': return pageAnnouncements();
     case 'directory': return pageDirectory();
     case 'team': return pageTeam();
+    case 'votes': return pageVotes();
     default: return pageDashboard();
   }
 }
@@ -543,6 +550,153 @@ async function dirEntrySheet(id) {
     ${d.recos.length ? d.recos.map(r => `<div class="iv"><div><b>${'★'.repeat(r.rating)}</b><div class="sub muted">${esc(r.comment || '')}</div></div><span class="muted">${esc(relTime(r.created_at, 'he'))}</span></div>`).join('') : '<p class="muted">אין המלצות.</p>'}`;
 }
 
+/* ------------------------------------------------------------------ votes et procurations */
+const VSTATUS = { draft: ['טיוטה', 'st-waiting'], open: ['פתוחה', 'st-in_progress'], closed: ['נסגרה', 'st-closed'], cancelled: ['בוטלה', 'st-cancelled'] };
+const PSTATUS = { pending: ['ממתין לאישור השכן', 'st-new'], awaiting_approval: ['ממתין לאישורך', 'st-waiting'], active: ['מאושר', 'st-resolved'], rejected: ['נדחה', 'st-cancelled'], revoked: ['בוטל', 'st-closed'] };
+const missingLangs = (title, body, tr) => ['fr', 'en'].filter(l => !tr?.[l]?.title || (body && !tr?.[l]?.body)).map(l => ({ fr: 'צרפתית', en: 'אנגלית' }[l]));
+const scopeLabel = (v) => v.scope_entrance ? `כניסה ${v.scope_entrance}` : v.scope_tower ? `בניין ${v.scope_tower}` : 'כל המתחם';
+const proxyScope = (p) => p.vote_id ? (C.data.votes.find(v => v.id === p.vote_id)?.title || 'הצבעה') : p.valid_until ? `כל ההצבעות עד ${fmtDate(p.valid_until, 'he', { day: 'numeric', month: 'numeric', year: 'numeric' })}` : 'כל ההצבעות';
+const holderLabel = (p) => p.holder_apartment ? aptLabel(aptOf(p.holder_apartment)) : `${p.holder_name} (חיצוני)`;
+function pageVotes() {
+  const V = C.data.votes, P = C.data.proxies;
+  const waiting = P.filter(p => p.status === 'awaiting_approval');
+  const live = P.filter(p => ['pending', 'active'].includes(p.status));
+  return `${errBanner('votes')}
+  <div class="page-title"><div><h1>הצבעות וייפויי כוח</h1><p>הצבעות של הבית המשותף, השתתפות, ותיקוף ייפויי הכוח שהדיירים נותנים זה לזה.</p></div>
+    ${can.manage() ? `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-line" data-act="proxy-paper">${icon('edit', 'ic-sm')}רישום ייפוי כוח בכתב</button><button class="btn btn-gold" data-act="vote-form">${icon('plus', 'ic-sm')}הצבעה חדשה</button></div>` : ''}</div>
+  ${waiting.length ? `<section class="card" style="margin-bottom:16px;border-color:#EBD7A6"><div class="card-h"><h2>${icon('alert')}ייפויי כוח הממתינים לאישורך (${waiting.length})</h2></div>
+    <div class="tbl-wrap"><table class="tbl responsive"><tbody>${waiting.map(p => `<tr>
+      <td><div class="ttl">${esc(aptLabel(aptOf(p.grantor_apartment)))} ← ${esc(holderLabel(p))}</div><div class="sub">${esc(proxyScope(p))} · אושר ע״י מיופה הכוח ${esc(relTime(p.responded_at, 'he'))}</div></td>
+      <td style="white-space:nowrap">${can.manage() ? `<button class="btn btn-gold btn-sm" data-act="proxy-approve" data-id="${p.id}">${icon('check', 'ic-sm')}אישור</button> <button class="btn btn-line btn-sm" data-act="proxy-reject" data-id="${p.id}">דחייה</button>` : ''}</td></tr>`).join('')}</tbody></table></div></section>` : ''}
+  <section class="card" style="margin-bottom:16px"><div class="card-h"><h2>${icon('vote')}הצבעות (${V.length})</h2></div>
+    ${V.length ? `<div class="tbl-wrap"><table class="tbl responsive"><thead><tr><th>נושא</th><th>סטטוס</th><th data-hide-m>קהל</th><th data-hide-m>כלל הכרעה</th><th data-hide-m>נסגרת</th></tr></thead><tbody>
+      ${V.map(v => `<tr class="clickable" data-act="vote-open" data-id="${v.id}"><td><div class="ttl">${esc(v.title)}</div><div class="sub">${(v.vote_options || []).length} אפשרויות${v.secret ? ' · חשאית' : ''}${v.weighted ? ' · משוקללת' : ''}</div></td>
+        <td><span class="badge ${VSTATUS[v.status][1]}">${VSTATUS[v.status][0]}</span></td><td data-hide-m>${scopeLabel(v)}</td><td data-hide-m>${label(VOTE_RULES, v.rule, 'he')}</td>
+        <td data-hide-m class="sub">${v.closes_at ? esc(fmtDateTime(v.closes_at, 'he')) : '—'}</td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="card-b">${empty('vote', 'עדיין אין הצבעות', 'צרו הצבעה (למשל: אישור שיפוץ הלובי) ופתחו אותה לדיירים.', can.manage() ? `<button class="btn btn-night" data-act="vote-form">${icon('plus', 'ic-sm')}הצבעה חדשה</button>` : '')}</div>`}</section>
+  <section class="card"><div class="card-h"><h2>${icon('users')}ייפויי כוח פעילים וממתינים (${live.length})</h2></div>
+    ${live.length ? `<div class="tbl-wrap"><table class="tbl responsive"><thead><tr><th>מייפה הכוח</th><th>מיופה הכוח</th><th data-hide-m>היקף</th><th>סטטוס</th><th></th></tr></thead><tbody>
+      ${live.map(p => `<tr><td>${esc(aptLabel(aptOf(p.grantor_apartment)))}</td><td>${esc(holderLabel(p))}${p.source === 'paper' ? '<div class="sub">בכתב</div>' : ''}</td><td data-hide-m class="sub">${esc(proxyScope(p))}</td>
+        <td><span class="badge ${PSTATUS[p.status][1]}">${PSTATUS[p.status][0]}</span></td>
+        <td>${can.manage() ? `<button class="btn btn-ghost btn-sm" data-act="proxy-cancel" data-id="${p.id}">ביטול</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="card-b"><p class="muted" style="margin:0">אין ייפויי כוח פעילים.</p></div>`}</section>
+  <p class="data-note">${icon('info', 'ic-sm')}ייפוי כוח שנשלח מהאפליקציה נכנס לתוקף רק לאחר אישור מיופה הכוח ואישורך. ייפוי כוח בכתב שאת/ה רושם/ת נכנס לתוקף מיד.</p>`;
+}
+function voteFormSheet(id) {
+  const v = id ? C.data.votes.find(x => x.id === id) : { rule: 'majority_cast', allow_proxies: true, translations: {}, vote_options: [] };
+  const locked = id && v.status !== 'draft';
+  const tr = v.translations || {};
+  const yesNo = !id || (v.vote_options || []).some(o => o.kind === 'yes');
+  const dt = (x) => x ? new Date(new Date(x).getTime() - new Date(x).getTimezoneOffset() * 6e4).toISOString().slice(0, 16) : '';
+  sheet(id ? 'עריכת הצבעה' : 'הצבעה חדשה', `<form id="vForm">
+    ${locked ? `<div class="banner banner-info" style="margin-bottom:12px">${icon('lock', 'ic-sm')}<span>ההצבעה כבר נפתחה: הכללים והאפשרויות נעולים.</span></div>` : ''}
+    <div class="seg lang-tabs" role="group">${[['he', 'עברית'], ['fr', 'Français'], ['en', 'English']].map(([k, l], i) => `<button type="button" data-act="ann-lang" data-l="${k}" aria-pressed="${i === 0}">${l}</button>`).join('')}</div>
+    ${['he', 'fr', 'en'].map(l => `<div data-pane="${l}" ${l !== 'he' ? 'hidden dir="ltr"' : ''}>
+      <div class="field"><label for="vT${l}">${{ he: 'נושא ההצבעה', fr: 'נושא בצרפתית', en: 'נושא באנגלית' }[l]}</label><input class="input" id="vT${l}" name="title_${l}" maxlength="160" value="${esc(l === 'he' ? v.title || '' : tr[l]?.title || '')}"></div>
+      <div class="field"><label for="vB${l}">${{ he: 'פירוט (הצעת ההחלטה, עלויות, מסמכים)', fr: 'פירוט בצרפתית', en: 'פירוט באנגלית' }[l]}</label><textarea class="textarea" id="vB${l}" name="body_${l}" maxlength="5000">${esc(l === 'he' ? v.body || '' : tr[l]?.body || '')}</textarea></div></div>`).join('')}
+    <p class="hint" style="margin:-4px 0 12px">נדרש נוסח בעברית, בצרפתית ובאנגלית לפני פתיחת ההצבעה, כדי שכל דייר יקרא אותה בשפתו.</p>
+    <div class="field"><span class="label">אפשרויות</span>
+      <label class="check"><input type="radio" name="otype" value="yesno" ${yesNo ? 'checked' : ''} ${locked ? 'disabled' : ''}><span>בעד / נגד / נמנע</span></label>
+      <label class="check"><input type="radio" name="otype" value="custom" ${yesNo ? '' : 'checked'} ${locked ? 'disabled' : ''}><span>אפשרויות לבחירה: שורה לכל אפשרות, בשלוש השפות (עברית | Français | English)</span></label>
+      <textarea class="textarea" name="custom" style="min-height:80px;margin-top:6px" ${locked ? 'disabled' : ''} placeholder="הצעת מחיר א׳ | Devis A | Quote A&#10;הצעת מחיר ב׳ | Devis B | Quote B" dir="auto">${esc((v.vote_options || []).filter(o => o.kind === 'choice').map(o => [o.label, o.translations?.fr || '', o.translations?.en || ''].join(' | ')).join('\n'))}</textarea></div>
+    <div class="props" style="margin-bottom:14px">
+      <div class="field"><label for="vR">כלל הכרעה</label><select class="select" id="vR" name="rule" ${locked ? 'disabled' : ''}>${VOTE_RULES.map(r => `<option value="${r.key}" ${v.rule === r.key ? 'selected' : ''}>${r.he}</option>`).join('')}</select></div>
+      <div class="field"><label for="vS">קהל מצביעים</label><select class="select" id="vS" name="scope" ${locked ? 'disabled' : ''}><option value="">כל המתחם</option><optgroup label="בניין">${[1, 2, 3, 4].map(n => `<option value="t${n}" ${!v.scope_entrance && v.scope_tower === n ? 'selected' : ''}>בניין ${n}</option>`).join('')}</optgroup><optgroup label="כניסה">${ENTRANCES.map(e => `<option value="e${e.id}" ${v.scope_entrance === e.id ? 'selected' : ''}>כניסה ${e.id}</option>`).join('')}</optgroup></select></div>
+      <div class="field"><label for="vO">פתיחה (לא חובה)</label><input class="input" type="datetime-local" id="vO" name="opens" value="${dt(v.opens_at)}" ${locked ? 'disabled' : ''}></div>
+      <div class="field"><label for="vC">סגירה</label><input class="input" type="datetime-local" id="vC" name="closes" value="${dt(v.closes_at)}"></div>
+      <div class="field"><label for="vM">מקסימום ייפויי כוח למיופה כוח</label><input class="input" type="number" min="1" max="50" id="vM" name="maxp" value="${v.max_proxies_per_holder ?? ''}" placeholder="ללא הגבלה" ${locked ? 'disabled' : ''}></div>
+    </div>
+    <label class="check" style="margin-bottom:6px"><input type="checkbox" name="weighted" ${v.weighted ? 'checked' : ''} ${locked ? 'disabled' : ''}><span>שקלול לפי חלקים ברכוש המשותף (מוגדר בכל דירה)</span></label>
+    <label class="check" style="margin-bottom:6px"><input type="checkbox" name="secret" ${v.secret ? 'checked' : ''} ${locked ? 'disabled' : ''}><span>הצבעה חשאית: גם הצוות לא יראה מה כל דירה בחרה</span></label>
+    <label class="check" style="margin-bottom:6px"><input type="checkbox" name="proxies" ${v.allow_proxies ? 'checked' : ''} ${locked ? 'disabled' : ''}><span>לאפשר הצבעה באמצעות ייפוי כוח</span></label>
+    <label class="check" style="margin-bottom:14px"><input type="checkbox" name="live" ${v.live_results ? 'checked' : ''}><span>להציג לדיירים תוצאות בזמן אמת (אחרת רק בסגירה)</span></label>
+    <p class="form-error" role="alert"></p><button class="btn btn-gold btn-block" type="submit">שמירה כטיוטה</button></form>`, (ov) => {
+    $('#vForm', ov).addEventListener('submit', async (e) => {
+      e.preventDefault(); const f = e.target;
+      if (f.title_he.value.trim().length < 3) return formErr(ov, 'יש להזין נושא בעברית (3 תווים לפחות).');
+      const translations = {};
+      for (const l of ['fr', 'en']) if (f['title_' + l].value.trim()) translations[l] = { title: f['title_' + l].value.trim(), body: f['body_' + l].value.trim() || null };
+      const payload = { title: f.title_he.value.trim(), body: f.body_he.value.trim() || null, translations, live_results: f.live.checked,
+        closes_at: f.closes.value ? new Date(f.closes.value).toISOString() : null };
+      let options = null;
+      if (!locked) {
+        const sc = f.scope.value;
+        Object.assign(payload, { rule: f.rule.value, weighted: f.weighted.checked, secret: f.secret.checked, allow_proxies: f.proxies.checked,
+          max_proxies_per_holder: f.maxp.value ? Number(f.maxp.value) : null, opens_at: f.opens.value ? new Date(f.opens.value).toISOString() : null,
+          scope_tower: sc.startsWith('t') ? Number(sc.slice(1)) : sc.startsWith('e') ? towerOfEntrance(sc.slice(1)) : null, scope_entrance: sc.startsWith('e') ? Number(sc.slice(1)) : null });
+        if (f.otype.value === 'yesno') options = [{ kind: 'yes', label: 'בעד', translations: { fr: 'Pour', en: 'For' } }, { kind: 'no', label: 'נגד', translations: { fr: 'Contre', en: 'Against' } }, { kind: 'abstain', label: 'נמנע', translations: { fr: 'Abstention', en: 'Abstain' } }];
+        else {
+          const lines = f.custom.value.split('\n').map(x => x.trim()).filter(Boolean);
+          if (lines.length < 2) return formErr(ov, 'יש להזין לפחות שתי אפשרויות.');
+          options = lines.slice(0, 12).map(l => { const [h, fr, en] = l.split('|').map(x => (x || '').trim()); return { kind: 'choice', label: h.slice(0, 120), translations: { ...(fr ? { fr } : {}), ...(en ? { en } : {}) } }; });
+          if (options.some(o => !o.translations.fr || !o.translations.en)) return formErr(ov, 'כתבו כל אפשרות בשלוש השפות, מופרדות בקו אנכי: עברית | Français | English');
+        }
+      }
+      try { const v2 = await api.saveVote({ ...(id ? { id } : {}), ...payload }, options); toast('ההצבעה נשמרה'); closeSheet(); C.data.votes = await api.votes(); render(); voteSheet(v2.id); }
+      catch (x) { formErr(ov, errMsg(x)); }
+    });
+  });
+}
+async function voteSheet(id) {
+  const v = C.data.votes.find(x => x.id === id); if (!v) return;
+  const ov = sheet(esc(v.title), '<div class="skel" style="height:200px"></div>');
+  let sum, part;
+  try { [sum, part] = await Promise.all([api.voteSummary(id), api.voteParticipation(id)]); }
+  catch (e) { $('.sheet-body', ov).innerHTML = `<div class="banner banner-error">${esc(errMsg(e))}</div>`; return; }
+  const optLabel = (oid) => (v.vote_options || []).find(o => o.id === oid)?.label || '';
+  const total = Math.max(Number(sum.cast_weight) || 0, 0.0001);
+  const method = { direct: 'באפליקציה', proxy: 'באמצעות ייפוי כוח', assembly: 'באסיפה / בכתב' };
+  const isOpenNow = v.status === 'open';
+  $('.sheet-body', ov).innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><span class="badge ${VSTATUS[v.status][1]}">${VSTATUS[v.status][0]}</span><span class="badge no-dot st-closed">${scopeLabel(v)}</span><span class="badge no-dot pr-normal">${label(VOTE_RULES, v.rule, 'he')}${v.weighted ? ' · משוקללת' : ''}</span>${v.secret ? '<span class="badge no-dot st-assigned">חשאית</span>' : ''}</div>
+    ${can.manage() ? `<div class="btn-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      ${v.status === 'draft' ? `<button class="btn btn-line btn-sm" data-act="vote-form" data-id="${v.id}">${icon('edit', 'ic-sm')}עריכה</button><button class="btn btn-gold btn-sm" data-act="vote-status" data-id="${v.id}" data-s="open">${icon('send', 'ic-sm flip-rtl')}פתיחת ההצבעה</button>` : ''}
+      ${isOpenNow ? `<button class="btn btn-line btn-sm" data-act="vote-form" data-id="${v.id}">${icon('edit', 'ic-sm')}מועד סגירה / תוצאות חיות</button><button class="btn btn-night btn-sm" data-act="vote-status" data-id="${v.id}" data-s="closed">${icon('lock', 'ic-sm')}סגירת ההצבעה</button>` : ''}
+      ${['draft', 'open'].includes(v.status) ? `<button class="btn btn-danger btn-sm" data-act="vote-status" data-id="${v.id}" data-s="cancelled">ביטול</button>` : ''}</div>` : ''}
+    <dl class="kv" style="grid-template-columns:repeat(3,1fr);margin-bottom:12px">
+      <div><dt>השתתפות</dt><dd>${sum.cast_count} / ${sum.eligible_count} דירות</dd></div>
+      <div><dt>${sum.weighted ? 'משקל שהצביע' : 'אחוז השתתפות'}</dt><dd>${sum.weighted ? `${Number(sum.cast_weight)} / ${Number(sum.eligible_weight)}` : (sum.eligible_count ? Math.round(sum.cast_count / sum.eligible_count * 100) + '%' : '—')}</dd></div>
+      <div><dt>תוצאה</dt><dd>${sum.passed === true ? '<span class="badge st-resolved">מתקבלת</span>' : sum.passed === false ? '<span class="badge st-cancelled">לא מתקבלת</span>' : '—'}</dd></div>
+    </dl>
+    ${sum.threshold_weight != null ? `<p class="hint" style="margin:0 0 10px">נדרש: ${Number(sum.threshold_weight).toFixed(2).replace(/\.00$/, '')} ${sum.weighted ? 'יחידות משקל' : 'קולות'} בעד (מתוך ${Number(sum.eligible_weight)}).</p>` : ''}
+    <div class="hbars" style="margin-bottom:16px">${sum.options.map(o => `<div class="hbar"><span>${esc(o.label)}</span><span class="bar"><span style="width:${Number(o.weight) / total * 100}%;background:${o.kind === 'yes' ? 'var(--st-resolved)' : o.kind === 'no' ? 'var(--pr-urgent)' : 'var(--night-700)'}"></span></span><b>${o.count}</b></div>`).join('')}</div>
+    ${isOpenNow && can.manage() ? `<form id="asmForm" class="panel" style="margin-bottom:16px"><b style="display:block;margin-bottom:8px">רישום קול שניתן באסיפה או בכתב</b>
+      <div class="props"><div class="field"><label for="asA">דירה</label><select class="select" id="asA">${part.map(r => `<option value="${r.apartment_id}">כניסה ${r.entrance} · דירה ${esc(r.number)}${r.method ? ' (הצביעה)' : ''}</option>`).join('')}</select></div>
+      <div class="field"><label for="asO">בחירה</label><select class="select" id="asO">${(v.vote_options || []).map(o => `<option value="${o.id}">${esc(o.label)}</option>`).join('')}</select></div></div>
+      <div class="field"><label for="asN">הערה (לא חובה)</label><input class="input" id="asN" maxlength="200" placeholder="אסיפה כללית מיום…"></div>
+      <p class="form-error" role="alert"></p><button class="btn btn-night btn-sm" type="submit">רישום הקול</button></form>` : ''}
+    <b style="display:block;margin-bottom:6px">השתתפות לפי דירה${v.secret ? ' (חשאית: הבחירה אינה מוצגת)' : ''}</b>
+    <div class="tbl-wrap" style="max-height:340px"><table class="tbl"><thead><tr><th>דירה</th><th>אופן</th>${v.secret ? '' : '<th>בחירה</th>'}<th>מועד</th></tr></thead><tbody>
+      ${part.map(r => `<tr><td>כניסה ${r.entrance} · ${esc(r.number)}</td><td>${r.method ? method[r.method] + (r.holder_label ? `<div class="sub">${esc(r.holder_label)}</div>` : '') : '<span class="muted">טרם הצביעה</span>'}</td>${v.secret ? '' : `<td>${esc(optLabel(r.option_id))}</td>`}<td class="sub">${r.cast_at ? esc(fmtDateTime(r.cast_at, 'he')) : ''}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  $('#asmForm', ov)?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await api.staffCastBallot(id, Number($('#asO', ov).value), Number($('#asA', ov).value), $('#asN', ov).value.trim() || null); toast('הקול נרשם'); voteSheet(id); }
+    catch (x) { formErr(ov, errMsg(x)); }
+  });
+}
+function paperProxySheet() {
+  const aptOpts = C.data.apartments.filter(a => a.active).map(a => `<option value="${a.id}">${esc(aptLabel(a))}${a.label ? ' · ' + esc(a.label) : ''}</option>`).join('');
+  const votesOpen = C.data.votes.filter(v => ['draft', 'open'].includes(v.status) && v.allow_proxies);
+  sheet('רישום ייפוי כוח בכתב', `<form id="ppForm"><p class="muted" style="margin-top:0">לייפוי כוח חתום שנמסר להנהלה. הוא נכנס לתוקף מיד. שמרו את המסמך המקורי.</p>
+    <div class="field"><label for="ppG">מייפה הכוח (הדירה)</label><select class="select" id="ppG">${aptOpts}</select></div>
+    <div class="field"><label for="ppH">מיופה הכוח</label><select class="select" id="ppH"><option value="">אדם שאינו דייר (שם בשדה הבא)</option>${aptOpts}</select></div>
+    <div class="field"><label for="ppN">שם מיופה הכוח (אם אינו דייר)</label><input class="input" id="ppN" maxlength="80"></div>
+    <div class="field"><label for="ppV">היקף</label><select class="select" id="ppV"><option value="">כל ההצבעות</option>${votesOpen.map(v => `<option value="${v.id}">${esc(v.title)}</option>`).join('')}</select></div>
+    <div class="field"><label for="ppU">בתוקף עד (לא חובה)</label><input class="input" type="date" id="ppU"></div>
+    <div class="field"><label for="ppT">הערה</label><input class="input" id="ppT" maxlength="300" placeholder="נחתם ב…, מסמך שמור ב…"></div>
+    <p class="form-error" role="alert"></p><button class="btn btn-gold btn-block" type="submit">רישום</button></form>`, (ov) => {
+    $('#ppForm', ov).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const g = Number($('#ppG', ov).value), h = $('#ppH', ov).value ? Number($('#ppH', ov).value) : null, n = $('#ppN', ov).value.trim();
+      if (!h && n.length < 2) return formErr(ov, 'בחרו דירה או הזינו את שם מיופה הכוח.');
+      if (h === g) return formErr(ov, 'מייפה הכוח ומיופה הכוח זהים.');
+      try { await api.staffRegisterProxy(g, h, h ? null : n, $('#ppV', ov).value ? Number($('#ppV', ov).value) : null, $('#ppU', ov).value ? new Date($('#ppU', ov).value + 'T23:59:00').toISOString() : null, $('#ppT', ov).value.trim() || null); toast('ייפוי הכוח נרשם'); closeSheet(); C.data.proxies = await api.proxies(); render(); }
+      catch (x) { formErr(ov, errMsg(x)); }
+    });
+  });
+}
+
 /* ------------------------------------------------------------------ équipe */
 function pageTeam() {
   const S = C.data.staff;
@@ -668,11 +822,15 @@ function aptSheet(id) {
   sheet(esc(aptLabel(a)), `<form id="apForm">
     <div class="props" style="margin-bottom:14px"><div class="field"><label for="apF">קומה</label><input class="input" id="apF" name="floor" inputmode="numeric" value="${a.floor ?? ''}"></div>
     <div class="field"><label for="apL">משפחה / הערה פנימית</label><input class="input" id="apL" name="label" maxlength="80" value="${esc(a.label || '')}"></div></div>
-    <label class="check" style="margin-bottom:14px"><input type="checkbox" name="active" ${a.active ? 'checked' : ''}><span>דירה פעילה</span></label>
+    <div class="props" style="margin-bottom:10px"><div class="field"><label for="apW">חלק ברכוש המשותף (משקל הצבעה)</label><input class="input" id="apW" name="weight" inputmode="decimal" value="${a.vote_weight ?? 1}"></div><span></span></div>
+    <label class="check" style="margin-bottom:6px"><input type="checkbox" name="active" ${a.active ? 'checked' : ''}><span>דירה פעילה</span></label>
+    <label class="check" style="margin-bottom:14px"><input type="checkbox" name="canvote" ${a.can_vote !== false ? 'checked' : ''}><span>זכאית להצביע (למשל: לבטל כשהחשבון בידי שוכרים)</span></label>
     <p class="hint">הערה זו גלויה לצוות בלבד.</p><p class="form-error" role="alert"></p><button class="btn btn-gold btn-block" type="submit">שמירה</button></form>`, (ov) => {
     $('#apForm', ov).addEventListener('submit', async (e) => {
       e.preventDefault(); const f = e.target;
-      try { await api.updateApartment(id, { floor: f.floor.value !== '' ? Number(f.floor.value) : null, label: f.label.value.trim() || null, active: f.active.checked }); toast('הדירה עודכנה'); closeSheet(); C.data.apartments = await api.apartments(); render(); }
+      try { const w = Number(String(f.weight.value).replace(',', '.'));
+      if (!(w > 0)) return formErr(ov, 'משקל ההצבעה חייב להיות מספר חיובי.');
+      await api.updateApartment(id, { floor: f.floor.value !== '' ? Number(f.floor.value) : null, label: f.label.value.trim() || null, active: f.active.checked, vote_weight: w, can_vote: f.canvote.checked }); toast('הדירה עודכנה'); closeSheet(); C.data.apartments = await api.apartments(); render(); }
       catch (x) { formErr(ov, errMsg(x)); }
     });
   });
@@ -709,7 +867,7 @@ function annSheet(id) {
   sheet(id ? 'עריכת הודעה' : 'הודעה חדשה', `<form id="anForm">
     <div class="seg lang-tabs" role="group">${[['he', 'עברית'], ['fr', 'Français'], ['en', 'English']].map(([k, l], i) => `<button type="button" data-act="ann-lang" data-l="${k}" aria-pressed="${i === 0}">${l}</button>`).join('')}</div>
     ${['he', 'fr', 'en'].map(l => `<div data-pane="${l}" ${l !== 'he' ? 'hidden' : ''} ${l !== 'he' ? 'dir="ltr"' : ''}>
-      <div class="field"><label for="anT${l}">${{ he: 'כותרת', fr: 'כותרת בצרפתית (לא חובה)', en: 'כותרת באנגלית (לא חובה)' }[l]}</label><input class="input" id="anT${l}" name="title_${l}" maxlength="140" value="${esc(l === 'he' ? a.title || '' : tr[l]?.title || '')}"></div>
+      <div class="field"><label for="anT${l}">${{ he: 'כותרת', fr: 'כותרת בצרפתית', en: 'כותרת באנגלית' }[l]}</label><input class="input" id="anT${l}" name="title_${l}" maxlength="140" value="${esc(l === 'he' ? a.title || '' : tr[l]?.title || '')}"></div>
       <div class="field"><label for="anB${l}">${{ he: 'תוכן', fr: 'תוכן בצרפתית', en: 'תוכן באנגלית' }[l]}</label><textarea class="textarea" id="anB${l}" name="body_${l}" maxlength="5000" style="min-height:130px">${esc(l === 'he' ? a.body || '' : tr[l]?.body || '')}</textarea></div></div>`).join('')}
     <div class="props" style="margin-bottom:14px">
       <div class="field"><label for="anC">סוג</label><select class="select" id="anC" name="category">${Object.entries(ANN_CAT).map(([k, l]) => `<option value="${k}" ${a.category === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
@@ -724,6 +882,8 @@ function annSheet(id) {
       if (f.title_he.value.trim().length < 2 || f.body_he.value.trim().length < 2) return formErr(ov, 'יש להזין כותרת ותוכן בעברית.');
       const translations = {};
       for (const l of ['fr', 'en']) if (f['title_' + l].value.trim() && f['body_' + l].value.trim()) translations[l] = { title: f['title_' + l].value.trim(), body: f['body_' + l].value.trim() };
+      const miss = missingLangs(f.title_he.value, f.body_he.value, translations);
+      if (f.published.checked && miss.length) return formErr(ov, `לפני פרסום יש להשלים כותרת ותוכן ב${miss.join(' וב')}, כדי שכל דייר יקרא בשפתו. אפשר לשמור כטיוטה בינתיים.`);
       try {
         await api.saveAnnouncement({ ...(id ? { id } : {}), title: f.title_he.value.trim(), body: f.body_he.value.trim(), translations, category: f.category.value, tower_id: f.tower.value.startsWith('t') ? Number(f.tower.value.slice(1)) : f.tower.value.startsWith('e') ? towerOfEntrance(f.tower.value.slice(1)) : null, entrance: f.tower.value.startsWith('e') ? Number(f.tower.value.slice(1)) : null, pinned: f.pinned.checked, published: f.published.checked, expires_at: f.expires.value ? new Date(f.expires.value + 'T23:59:00').toISOString() : null });
         toast(f.published.checked ? 'ההודעה פורסמה' : 'הטיוטה נשמרה'); closeSheet(); C.data.announcements = await api.announcements(); render();
@@ -832,6 +992,23 @@ const actions = {
   'dir-restore': async (el) => { try { await api.restoreVersion(Number(el.dataset.id), Number(el.dataset.v)); toast(`גרסה ${el.dataset.v} שוחזרה`); C.data.directory = await api.directory(); render(); dirEntrySheet(Number(el.dataset.id)); } catch (x) { toast(errMsg(x), 'error'); } },
   'resolve-report': async (el) => { try { await api.resolveReport(Number(el.dataset.id)); toast('הדיווח סומן כמטופל'); C.data.reports = await api.directoryReports(); render(); } catch (x) { toast(errMsg(x), 'error'); } },
   'staff-form': () => staffSheet(),
+  'vote-form': (el) => voteFormSheet(el.dataset.id ? Number(el.dataset.id) : null),
+  'vote-open': (el) => voteSheet(Number(el.dataset.id)),
+  'vote-status': async (el) => {
+    const st = el.dataset.s;
+    if (st === 'open') {
+      const v = C.data.votes.find(x => x.id === Number(el.dataset.id)), miss = missingLangs(v.title, v.body, v.translations);
+      if (miss.length) { toast(`חסר תרגום ל${miss.join(' ול')}: הדיירים שבחרו בשפות אלו היו רואים עברית. השלימו בעריכת ההצבעה.`, 'error'); return; }
+    }
+    const msg = { open: 'לפתוח את ההצבעה? מרגע זה הכללים והאפשרויות ננעלים.', closed: 'לסגור את ההצבעה? לא ניתן יהיה להצביע עוד.', cancelled: 'לבטל את ההצבעה?' }[st];
+    if (!confirm(msg)) return;
+    try { await api.setVoteStatus(Number(el.dataset.id), st); toast({ open: 'ההצבעה נפתחה', closed: 'ההצבעה נסגרה', cancelled: 'ההצבעה בוטלה' }[st]); C.data.votes = await api.votes(); render(); voteSheet(Number(el.dataset.id)); }
+    catch (x) { toast(errMsg(x), 'error'); }
+  },
+  'proxy-approve': async (el) => { try { await api.approveProxy(Number(el.dataset.id), true); toast('ייפוי הכוח אושר'); C.data.proxies = await api.proxies(); render(); } catch (x) { toast(errMsg(x), 'error'); } },
+  'proxy-reject': async (el) => { const r = prompt('סיבת הדחייה (תוצג לדייר):', ''); if (r === null) return; try { await api.approveProxy(Number(el.dataset.id), false, r); toast('ייפוי הכוח נדחה'); C.data.proxies = await api.proxies(); render(); } catch (x) { toast(errMsg(x), 'error'); } },
+  'proxy-cancel': async (el) => { if (!confirm('לבטל את ייפוי הכוח?')) return; try { await api.revokeProxy(Number(el.dataset.id)); toast('ייפוי הכוח בוטל'); C.data.proxies = await api.proxies(); render(); } catch (x) { toast(errMsg(x), 'error'); } },
+  'proxy-paper': () => paperProxySheet(),
   'my-pass': () => sheet('שינוי סיסמה', `<form id="pwForm">
     <div class="field"><label for="pw1">סיסמה חדשה (10 תווים לפחות)</label><input class="input" id="pw1" type="password" dir="ltr" autocomplete="new-password" minlength="10" required></div>
     <div class="field"><label for="pw2">אימות הסיסמה</label><input class="input" id="pw2" type="password" dir="ltr" autocomplete="new-password" required></div>

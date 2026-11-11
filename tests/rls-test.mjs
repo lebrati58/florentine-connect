@@ -161,6 +161,84 @@ for (let i = 0; i < 35 && !limited; i++) {
 }
 ok(limited, 'anti-abus : plafond de modifications sur 24 h');
 
+console.log('\n— Votes de copropriété et procurations');
+const q1 = async (who, sql, params) => { const r = await as(who, sql, params); return r.error ? { error: r.error } : (r.rows[0] || {}); };
+const v1 = (await as('owner', `insert into public.votes(title,rule) values ('Ravalement de façade','majority_cast') returning id`)).rows[0].id;
+for (const [k, l, i] of [['yes','Pour',1],['no','Contre',2],['abstain','Abstention',3]])
+  await as('owner', `insert into public.vote_options(vote_id,kind,label,position) values ($1,$2,$3,$4)`, [v1, k, l, i]);
+const opt = Object.fromEntries((await db.query(`select kind, id from public.vote_options where vote_id=$1`, [v1])).rows.map(r => [r.kind, r.id]));
+ok((await as('A', `select * from public.votes`)).rows.length === 0, 'brouillon invisible pour les résidents');
+const v0 = (await as('owner', `insert into public.votes(title) values ('Sans options') returning id`)).rows[0].id;
+ok(/vote_without_options/.test((await as('owner', `update public.votes set status='open' where id=$1`, [v0])).error || ''), 'impossible d’ouvrir un vote sans options');
+ok(!!(await as('tech', `update public.votes set status='open' where id=$1 returning id`, [v1])).rows?.length === false, 'technicien ne peut pas ouvrir un vote');
+ok(!(await as('owner', `update public.votes set status='open' where id=$1`, [v1])).error, 'gestionnaire ouvre le vote');
+ok((await as('A', `select * from public.votes`)).rows.length === 1, 'vote ouvert visible par les résidents');
+ok((await as('X', `select * from public.votes`)).rows.length === 0, 'non-membre : aucun vote visible');
+ok(/vote_locked/.test((await as('owner', `update public.votes set rule='two_thirds_all' where id=$1`, [v1])).error || ''), 'règle verrouillée après ouverture');
+ok(/vote_locked/.test((await as('owner', `insert into public.vote_options(vote_id,label) values ($1,'Ajout')`, [v1])).error || ''), 'options verrouillées après ouverture');
+ok(!!(await as('A', `insert into public.ballots(vote_id,apartment_id,option_id,method) values ($1,1,$2,'direct')`, [v1, opt.yes])).error, 'insertion directe d’un bulletin refusée');
+ok((await q1('A', `select public.cast_ballot($1,$2) r`, [v1, opt.yes])).r === 'direct', 'A vote pour lui-même');
+ok(!(await as('A', `select public.cast_ballot($1,$2)`, [v1, opt.no])).error, 'A peut changer son vote tant que c’est ouvert');
+await as('A', `select public.cast_ballot($1,$2)`, [v1, opt.yes]);
+ok(/no_proxy/.test((await as('A', `select public.cast_ballot($1,$2,$3)`, [v1, opt.no, 2])).error || ''), 'voter pour un autre sans procuration : refusé');
+ok(/self_proxy/.test((await as('B', `select public.grant_proxy(3::smallint,'30',$1)`, [v1])).error || ''), 'procuration à soi-même refusée');
+ok(/holder_not_found/.test((await as('B', `select public.grant_proxy(5::smallint,'999',$1)`, [v1])).error || ''), 'mandataire inconnu refusé');
+const px = (await q1('B', `select public.grant_proxy(2::smallint,'14',$1) id`, [v1])).id;
+ok(!!px, 'B donne procuration à C (entrée 2, appt 14)');
+ok(/no_proxy/.test((await as('C', `select public.cast_ballot($1,$2,2)`, [v1, opt.no])).error || ''), 'procuration non acceptée : C ne peut pas encore voter');
+ok(/forbidden/.test((await as('A', `select public.respond_proxy($1,true)`, [px])).error || ''), 'seul le mandataire peut accepter');
+ok(!(await as('C', `select public.respond_proxy($1,true)`, [px])).error, 'C accepte la procuration');
+ok(/no_proxy/.test((await as('C', `select public.cast_ballot($1,$2,2)`, [v1, opt.no])).error || ''), 'acceptée mais pas encore validée par l’admin : C ne peut pas voter');
+ok(/forbidden/.test((await as('tech', `select public.approve_proxy($1,true)`, [px])).error || ''), 'un technicien ne peut pas valider une procuration');
+ok(/forbidden/.test((await as('B', `select public.approve_proxy($1,true)`, [px])).error || ''), 'le mandant ne peut pas valider sa propre procuration');
+ok(!(await as('owner', `select public.approve_proxy($1,true)`, [px])).error, 'l’administrateur valide la procuration');
+const myp = (await as('C', `select * from public.my_proxies()`)).rows;
+ok(myp.length === 1 && myp[0].direction === 'received' && myp[0].other_label === 'E3-30', 'C voit la procuration reçue de E3-30');
+ok((await q1('C', `select public.cast_ballot($1,$2,2) r`, [v1, opt.no])).r === 'proxy', 'C vote « contre » au nom de B');
+ok((await as('C', `select * from public.ballots where apartment_id=2`)).rows.length === 1, 'C voit le bulletin déposé pour B');
+ok((await q1('B', `select public.cast_ballot($1,$2) r`, [v1, opt.yes])).r === 'direct', 'B vote lui-même : son vote remplace celui du mandataire');
+ok(/owner_already_voted/.test((await as('C', `select public.cast_ballot($1,$2,2)`, [v1, opt.no])).error || ''), 'le mandataire ne peut plus écraser le vote de B');
+ok((await q1('A', `select public.vote_summary($1) s`, [v1])).s.hidden === true, 'résultats masqués aux résidents pendant le vote');
+let sm = (await q1('owner', `select public.vote_summary($1) s`, [v1])).s;
+ok(sm.cast_count === 2 && Number(sm.yes_weight) === 2 && sm.eligible_count === 4, `équipe : 2 votants sur 4 éligibles, 2 « pour » (${sm.cast_count}/${sm.eligible_count})`);
+ok((await as('tech', `select * from public.ballot_log where vote_id=$1`, [v1])).rows.length === 5, 'journal complet des voix (changements compris)');
+ok(/forbidden/.test((await as('tech', `select public.staff_cast_ballot($1,$2,4)`, [v1, opt.no])).error || ''), 'technicien ne peut pas saisir une voix d’assemblée');
+{ const r = await as('owner', `select public.staff_cast_ballot($1,$2,(select id from public.apartments where entrance=2 and number='12'),'Assemblée du 12/11')`, [v1, opt.no]); ok(!r.error, 'gestionnaire saisit une voix exprimée en assemblée ' + (r.error || '')); }
+await as('owner', `update public.votes set status='closed' where id=$1`, [v1]);
+ok(/vote_closed/.test((await as('A', `select public.cast_ballot($1,$2)`, [v1, opt.no])).error || ''), 'vote clos : plus de bulletin');
+sm = (await q1('A', `select public.vote_summary($1) s`, [v1])).s;
+ok(sm.hidden === false && sm.passed === true && sm.cast_count === 3, 'vote clos : résultat visible par les résidents, adopté (2 pour / 1 contre)');
+
+// Vote secret, pondéré, majorité des 2/3 de tous les appartements
+await db.exec(`update public.apartments set vote_weight = case number when '12' then 3 else 1 end`);
+const v2 = (await as('owner', `insert into public.votes(title,rule,weighted,secret,max_proxies_per_holder) values ('Travaux ascenseur','two_thirds_all',true,true,1) returning id`)).rows[0].id;
+await as('owner', `insert into public.vote_options(vote_id,kind,label) values ($1,'yes','Pour'),($1,'no','Contre')`, [v2]);
+const o2 = Object.fromEntries((await db.query(`select kind, id from public.vote_options where vote_id=$1`, [v2])).rows.map(r => [r.kind, r.id]));
+await as('owner', `update public.votes set status='open' where id=$1`, [v2]);
+await as('A', `select public.cast_ballot($1,$2)`, [v2, o2.yes]);
+ok((await as('owner', `select * from public.ballots where vote_id=$1`, [v2])).rows.length === 0, 'vote secret : l’équipe ne voit aucun bulletin individuel');
+const part = (await as('owner', `select * from public.vote_participation($1)`, [v2])).rows;
+ok(part.some(r => r.method === 'direct' && r.option_id === null), 'vote secret : participation visible, choix masqué');
+const pa = (await q1('A', `select public.grant_proxy(2::smallint,'14',$1) id`, [v2])).id;
+const pb = (await q1('B', `select public.grant_proxy(2::smallint,'14',$1) id`, [v2])).id;
+await as('C', `select public.respond_proxy($1,true)`, [pa]); await as('owner', `select public.approve_proxy($1,true)`, [pa]);
+await as('C', `select public.respond_proxy($1,true)`, [pb]);
+ok(/proxy_limit/.test((await as('owner', `select public.approve_proxy($1,true)`, [pb])).error || ''), 'plafond de procurations par mandataire respecté à la validation');
+ok(!(await as('owner', `select public.approve_proxy($1,false,'Plafond atteint')`, [pb])).error, 'l’administrateur refuse avec un motif');
+const rej = (await as('B', `select * from public.my_proxies()`)).rows.find(r => r.id === pb);
+ok(rej && rej.status === 'rejected' && rej.rejected_reason === 'Plafond atteint', 'le mandant voit le refus et son motif');
+ok(!(await as('A', `select public.revoke_proxy($1)`, [pa])).error, 'A révoque sa procuration');
+ok(/no_proxy/.test((await as('C', `select public.cast_ballot($1,$2,1)`, [v2, o2.no])).error || ''), 'procuration révoquée : le mandataire ne peut plus voter');
+sm = (await q1('owner', `select public.vote_summary($1) s`, [v2])).s;
+ok(Number(sm.eligible_weight) === 8 && Number(sm.yes_weight) === 3 && sm.passed === false, `pondéré 2/3 : 3/8 « pour » → non adopté (${sm.yes_weight}/${sm.eligible_weight})`);
+{ const ex = (await q1('owner', `select public.staff_register_proxy((select id from public.apartments where entrance=2 and number='12'), null, 'Me Cohen (avocat)', $1, null, 'Procuration signée reçue') id`, [v2])).id;
+  ok(!!ex && (await db.query(`select status from public.proxies where id=$1`, [ex])).rows[0].status === 'active', 'procuration papier enregistrée par l’admin : active immédiatement'); }
+const v3 = (await as('owner', `insert into public.votes(title,scope_entrance) values ('Peinture lobby entrée 3',3) returning id`)).rows[0].id;
+await as('owner', `insert into public.vote_options(vote_id,kind,label) values ($1,'yes','Pour')`, [v3]);
+await as('owner', `update public.votes set status='open' where id=$1`, [v3]);
+ok((await as('A', `select * from public.votes where id=$1`, [v3])).rows.length === 0 && (await as('B', `select * from public.votes where id=$1`, [v3])).rows.length === 1, 'vote limité à l’entrée 3 : visible seulement par l’entrée 3');
+ok(/not_eligible/.test((await as('A', `select public.cast_ballot($1,(select id from public.vote_options where vote_id=$1))`, [v3])).error || ''), 'appartement hors périmètre : vote refusé');
+
 console.log('\n— Révocation de session (fonction serveur uniquement)');
 ok(!!(await as('A', 'select public.revoke_user_sessions($1)', [U.A])).error, 'résident ne peut pas appeler la révocation');
 

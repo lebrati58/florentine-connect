@@ -228,3 +228,29 @@ h1, h2, h3 { margin: 0; }
 .guide-danger { background: var(--pr-urgent-bg); border-color: #EFC3BF; }
 .guide-danger > .ic { color: var(--pr-urgent); }
 .guide-steps { margin: 10px 0 4px; padding-inline-start: 20px; font-size: var(--fs-sm); color: var(--ink-2); display: grid; gap: 4px; }
+
+/* Votes et procurations */
+.vote-card { width: 100%; display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; padding: 14px 16px; margin-bottom: 10px; border-radius: var(--r-md); background: var(--white); border: 1px solid var(--line); text-align: start; cursor: pointer; color: var(--ink); box-shadow: var(--shadow-1); }
+.vote-card > .ic { width: 26px; height: 26px; color: var(--gold-700); }
+.vote-card strong { display: block; font-size: var(--fs-base); }
+.vote-card small { display: block; color: var(--ink-3); font-size: var(--fs-xs); margin-top: 2px; }
+.vote-card.ask { background: #FBF6E8; border-color: #EBDDB4; }
+.proxy-row { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); }
+.proxy-row:first-child { border-top: 0; }
+.proxy-row strong { display: block; font-size: var(--fs-sm); }
+.proxy-row small { display: block; color: var(--ink-3); font-size: var(--fs-xs); }
+.ballot { background: var(--white); border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; margin-bottom: 12px; display: grid; gap: 12px; }
+.ballot-for { font-weight: 600; font-size: var(--fs-sm); color: var(--gold-700); }
+.ballot-opts { display: grid; gap: 8px; }
+.ballot-opt { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: var(--r-sm); border: 1px solid var(--line-2); cursor: pointer; font-weight: 600; }
+.ballot-opt input { width: 20px; height: 20px; accent-color: var(--night-800); }
+.ballot-opt:has(input:checked) { border-color: var(--gold-500); background: #FFFCF3; box-shadow: var(--ring); }
+.ballot-opt.k-yes:has(input:checked) { border-color: var(--st-resolved); background: var(--st-resolved-bg); box-shadow: none; }
+.ballot-opt.k-no:has(input:checked) { border-color: var(--pr-urgent); background: var(--pr-urgent-bg); box-shadow: none; }
+.res-row { display: grid; grid-template-columns: minmax(80px, 30%) 1fr 36px; gap: 10px; align-items: center; padding: 6px 0; font-size: var(--fs-sm); }
+.res-row .bar { height: 10px; border-radius: 5px; background: var(--paper-2); overflow: hidden; }
+.res-row .bar i { display: block; height: 100%; background: var(--night-700); border-radius: 5px; }
+.res-row b { text-align: end; font-variant-numeric: tabular-nums; }
+.outcome { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 10px; }
+.outcome.ok { color: var(--st-resolved); }
+.outcome.ko { color: var(--pr-urgent); }

@@ -52,9 +52,28 @@ pipeline de build pour GitHub Pages. Zéro dépendance à l’exécution hormis 
   plafond de 30 modifications / 24 h par compte, masquage par l’équipe.
 - La clé `service_role` n’existe que dans la fonction serveur `admin-api`.
 
+## Votes de copropriété et procurations (v2.2)
+
+- **Une voix par appartement**, ou pondérée par la quote-part (`vote_weight`, réglable par appartement dans le CRM).
+  Un appartement peut être exclu des votes (`can_vote`), par exemple si le compte est utilisé par des locataires.
+- **Règles** : majorité des voix exprimées, majorité de tous les appartements, 2/3 ou 3/4 de tous les appartements.
+  Périmètre : tout le complexe, une tour ou une entrée. Règles et options **verrouillées dès l'ouverture**.
+- **Procuration (ייפוי כוח)** : le résident désigne un autre appartement (un vote précis, ou tous les votes jusqu'à une date)
+  → le mandataire accepte → **l'administrateur valide**. Révocable à tout moment ; le vote direct du mandant l'emporte
+  toujours. Plafond optionnel de procurations par mandataire. Les procurations papier saisies par l'admin sont actives
+  immédiatement (mandataire résident ou personne extérieure).
+- **Assemblée physique** : l'admin saisit les voix exprimées sur place ou par bulletin papier.
+- **Vote secret** : personne, équipe comprise, ne voit le choix d'un appartement — uniquement les totaux et la participation.
+- **Traçabilité** : journal de toutes les voix (`ballot_log`, y compris les changements), hors votes secrets.
+- **Langues** : un vote ne peut être ouvert (et une annonce publiée) que si son texte existe en hébreu, français et anglais.
+
+Limite à connaître : le compte d'un appartement est partagé par ses occupants ; l'application enregistre la voix de
+l'appartement, pas l'identité de la personne qui a cliqué. Pour les décisions qui l'exigent légalement (signature,
+majorités spéciales de la loi sur les biens immobiliers), garder le procès-verbal et les procurations signées.
+
 ## Mise en service (une fois)
 
-1. Appliquer `supabase/migrations/20261110120000_platform_v2.sql` (SQL editor ou `supabase db push`).
+1. Appliquer dans l'ordre les fichiers de `supabase/migrations/` (SQL editor ou `supabase db push`).
 2. Déployer la fonction : `supabase functions deploy admin-api`
    (secrets optionnels : `ALLOWED_ORIGINS`, `APARTMENT_EMAIL_DOMAIN`).
 3. Ouvrir `/admin/`, « הגדרה ראשונית » : le premier compte créé devient propriétaire.
@@ -65,7 +84,7 @@ pipeline de build pour GitHub Pages. Zéro dépendance à l’exécution hormis 
 ## Tests
 
 ```bash
-cd tests && npm install && npm run rls          # règles d’accès sur PostgreSQL
+cd tests && npm install && node rls-test.mjs <migrations séparées par des virgules>   # 119 tests d’accès
 python3 -m http.server 8811 &                    # depuis la racine du dépôt
 python3 tests/e2e.py http://localhost:8811/ tests/shots
 ```

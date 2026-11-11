@@ -101,6 +101,14 @@ export const TRADES = [
   { key: 'other',       icon: 'dots',     fr: 'Autre',          he: 'אחר',          en: 'Other' },
 ];
 
+export const VOTE_RULES = [
+  { key: 'majority_cast',      fr: 'Majorité des voix exprimées',          he: 'רוב קולות המצביעים',          en: 'Majority of votes cast' },
+  { key: 'majority_all',       fr: 'Majorité de tous les appartements',    he: 'רוב מכלל הדירות',             en: 'Majority of all apartments' },
+  { key: 'two_thirds_all',     fr: '2/3 de tous les appartements',         he: 'שני שלישים מכלל הדירות',       en: 'Two thirds of all apartments' },
+  { key: 'three_quarters_all', fr: '3/4 de tous les appartements',         he: 'שלושה רבעים מכלל הדירות',      en: 'Three quarters of all apartments' },
+];
+export const optionText = (o, lang) => (o.translations && o.translations[lang]) || o.label;
+
 export const label = (list, key, lang) => {
   const item = list.find(x => x.key === key);
   return item ? (item[lang] || item.fr) : key;
@@ -170,6 +178,7 @@ export function errorKey(e) {
   if (/directory_phone_consent/.test(m)) return 'phone_consent';
   if (/duplicate key|unique/i.test(m)) return 'duplicate';
   if (/cannot_cancel/.test(m)) return 'cannot_cancel';
+  for (const k of ['vote_closed', 'not_eligible', 'no_proxy', 'owner_already_voted', 'proxies_disabled', 'holder_not_found', 'self_proxy', 'proxy_limit', 'bad_date', 'vote_locked', 'vote_without_options', 'proxy_not_pending', 'proxy_not_awaiting']) if (m.includes(k)) return k;
   if (/forbidden|permission|not_member|row-level security/i.test(m)) return 'forbidden';
   return 'unknown';
 }
@@ -298,10 +307,47 @@ export function createApi(storageKey) {
       return error ? null : data;
     },
 
+    /* Votes et procurations */
+    async votes() {
+      return must(await sb.from('votes').select('*, vote_options(*)').order('created_at', { ascending: false }).order('position', { foreignTable: 'vote_options' }));
+    },
+    async voteSummary(id) { return must(await sb.rpc('vote_summary', { p_vote: id })); },
+    async myBallots() { return must(await sb.from('ballots').select('vote_id, apartment_id, option_id, method, cast_at')); },
+    async castBallot(vote, option, forApartment = null) {
+      return must(await sb.rpc('cast_ballot', { p_vote: vote, p_option: option, p_for_apartment: forApartment }));
+    },
+    async myProxies() { return must(await sb.rpc('my_proxies')); },
+    async grantProxy(entrance, number, vote = null, validUntil = null) {
+      return must(await sb.rpc('grant_proxy', { p_holder_entrance: Number(entrance), p_holder_number: String(number), p_vote: vote, p_valid_until: validUntil }));
+    },
+    async respondProxy(id, accept) { return must(await sb.rpc('respond_proxy', { p_proxy: id, p_accept: accept })); },
+    async revokeProxy(id) { return must(await sb.rpc('revoke_proxy', { p_proxy: id })); },
+    // CRM
+    async saveVote(vote, options) {
+      const { id, ...rest } = vote;
+      const v = id ? must(await sb.from('votes').update(rest).eq('id', id).select().single())
+                   : must(await sb.from('votes').insert(rest).select().single());
+      if (options) {
+        must(await sb.from('vote_options').delete().eq('vote_id', v.id));
+        if (options.length) must(await sb.from('vote_options').insert(options.map((o, i) => ({ ...o, vote_id: v.id, position: i + 1 }))));
+      }
+      return v;
+    },
+    async setVoteStatus(id, status) { return must(await sb.from('votes').update({ status }).eq('id', id).select().single()); },
+    async voteParticipation(id) { return must(await sb.rpc('vote_participation', { p_vote: id })); },
+    async proxies() { return must(await sb.from('proxies').select('*').order('created_at', { ascending: false }).limit(500)); },
+    async approveProxy(id, approve, reason = null) { return must(await sb.rpc('approve_proxy', { p_proxy: id, p_approve: approve, p_reason: reason })); },
+    async staffRegisterProxy(grantor, holder, holderName, vote, validUntil, note) {
+      return must(await sb.rpc('staff_register_proxy', { p_grantor: grantor, p_holder: holder, p_holder_name: holderName, p_vote: vote, p_valid_until: validUntil, p_note: note }));
+    },
+    async staffCastBallot(vote, option, apartment, note) {
+      return must(await sb.rpc('staff_cast_ballot', { p_vote: vote, p_option: option, p_apartment: apartment, p_note: note }));
+    },
+
     /* CRM : équipe, appartements, fournisseurs, interventions */
     async staff() { return must(await sb.from('staff').select('*').order('full_name')); },
     async updateStaff(userId, patch) { return must(await sb.from('staff').update(patch).eq('user_id', userId)); },
-    async apartments() { return must(await sb.from('apartments').select('id, entrance, tower_id, number, floor, label, active, pin_set_at, user_id').order('entrance').order('number')); },
+    async apartments() { return must(await sb.from('apartments').select('id, entrance, tower_id, number, floor, label, active, pin_set_at, user_id, vote_weight, can_vote').order('entrance').order('number')); },
     async addApartments(rows) { return must(await sb.from('apartments').insert(rows).select()); },
     async updateApartment(id, patch) { return must(await sb.from('apartments').update(patch).eq('id', id)); },
     async updateTower(id, patch) { return must(await sb.from('towers').update(patch).eq('id', id)); },

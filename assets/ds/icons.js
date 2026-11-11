@@ -70,6 +70,7 @@ const P = {
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/>',
   roof: '<path d="M2 12 12 4l10 8"/><path d="M5 10v10h14V10"/>',
   smartphone: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  vote: '<path d="M4 13h16v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M8 13V5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v8"/><path d="m10 8.5 1.5 1.5L14.5 7"/><path d="M9 17h6"/>',
   message: '<path d="M4 5h16v11H9l-5 4z"/>',
 };
 
