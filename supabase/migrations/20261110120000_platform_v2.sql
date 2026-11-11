@@ -582,26 +582,26 @@ left join (select entry_id, avg(rating) avg_rating, count(*) reco_count
 left join (select entry_id, count(*) open_reports
              from public.directory_reports where resolved_at is null group by entry_id) p on p.entry_id = e.id;
 
--- Contenu de l'ancien annuaire public (prénoms + métiers, sans aucun numéro)
-insert into public.directory_entries (trade, name, notes, source, created_at)
-select v.trade, v.name, 'Importé de l''ancien annuaire public — coordonnées à compléter par les voisins.', 'legacy', now()
+-- Contenu de l'ancien annuaire public : prénoms + métier (traduit par l'interface), sans aucun numéro ni texte en dur
+insert into public.directory_entries (trade, name, source, created_at)
+select v.trade, v.name, 'legacy', now()
 from (values
-  ('plumbing','Shimon — réparation de fuites'),
-  ('plumbing','Matan — solutions de plomberie'),
-  ('electricity','Moshe — petits travaux'),
-  ('ac','Matan — climatisation'),
-  ('ac','Henry — climatisation'),
-  ('cleaning','Goli — ménage'),
+  ('plumbing','Shimon'),
+  ('plumbing','Matan'),
+  ('electricity','Moshe'),
+  ('ac','Matan'),
+  ('ac','Henry'),
+  ('cleaning','Goli'),
   ('cleaning','Maryann Cleaning'),
-  ('cleaning','Patrick — ménage'),
-  ('windows','Moshe — réparation de poignées'),
-  ('taxi','Lionel — taxi'),
-  ('taxi','Sagi — taxi'),
-  ('taxi','Yossi — taxi'),
-  ('taxi','Elie — taxi'),
-  ('taxi','Oren — taxi'),
-  ('taxi','Effi — taxi'),
-  ('insurance','IMAGEST — Deborah'),
+  ('cleaning','Patrick'),
+  ('windows','Moshe'),
+  ('taxi','Lionel'),
+  ('taxi','Sagi'),
+  ('taxi','Yossi'),
+  ('taxi','Elie'),
+  ('taxi','Oren'),
+  ('taxi','Effi'),
+  ('insurance','IMAGEST (Deborah)'),
   ('moving','Anglo Movers')
 ) as v(trade, name)
 where not exists (select 1 from public.directory_entries where source = 'legacy');

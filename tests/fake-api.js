@@ -23,8 +23,8 @@
       tickets: [], events: [], photos: [], vendors: [], interventions: [], announcements: [],
       directory: [], revisions: [], recos: [], reports: [],
     };
-    for (const [trade, name] of [['plumbing', 'Shimon — réparation de fuites'], ['electricity', 'Moshe — petits travaux'], ['cleaning', 'Maryann Cleaning'], ['taxi', 'Sagi — taxi']]) {
-      const e = { id: db.seq++, trade, name, phone: null, phone_public_ok: false, website: null, area: null, notes: 'Importé de l’ancien annuaire public.', status: 'active', source: 'legacy', version: 1, created_at: now(), updated_at: now() };
+    for (const [trade, name] of [['plumbing', 'Shimon'], ['electricity', 'Moshe'], ['cleaning', 'Maryann Cleaning'], ['taxi', 'Sagi']]) {
+      const e = { id: db.seq++, trade, name, phone: null, phone_public_ok: false, website: null, area: null, notes: null, status: 'active', source: 'legacy', version: 1, created_at: now(), updated_at: now() };
       db.directory.push(e); db.revisions.push({ id: db.seq++, entry_id: e.id, version: 1, change_kind: 'create', snapshot: { ...e }, created_at: now() });
     }
     save(db);

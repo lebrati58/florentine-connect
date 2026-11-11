@@ -1,6 +1,7 @@
 // Textes de l'application résidents — français, hébreu, anglais.
 export const T = {
   fr: {
+    navLabel: 'Navigation principale', langLabel: 'Langue', pageTitle: 'Résidents',
     appName: 'Résidence 4FLORENTINE',
     loginTitle: 'Bienvenue chez vous',
     loginLead: 'Connectez-vous avec le code de votre appartement.',
@@ -62,6 +63,7 @@ export const T = {
     close: 'Fermer', cancel: 'Annuler', confirm: 'Confirmer', back: 'Retour',
   },
   he: {
+    navLabel: 'ניווט ראשי', langLabel: 'שפה', pageTitle: 'דיירים',
     appName: 'מתחם 4FLORENTINE',
     loginTitle: 'ברוכים הבאים הביתה',
     loginLead: 'התחברו עם הקוד של הדירה.',
@@ -118,6 +120,7 @@ export const T = {
     close: 'סגירה', cancel: 'ביטול', confirm: 'אישור', back: 'חזרה',
   },
   en: {
+    navLabel: 'Main navigation', langLabel: 'Language', pageTitle: 'Residents',
     appName: '4FLORENTINE Residence',
     loginTitle: 'Welcome home',
     loginLead: 'Sign in with your apartment code.',

@@ -36,11 +36,11 @@ function setLang(lang) {
   S.lang = T[lang] ? lang : 'fr';
   document.documentElement.lang = S.lang;
   document.documentElement.dir = S.lang === 'he' ? 'rtl' : 'ltr';
-  document.title = '4FLORENTINE · ' + (S.lang === 'he' ? 'דיירים' : S.lang === 'en' ? 'Residents' : 'Résidents');
+  document.title = '4FLORENTINE · ' + t('pageTitle');
   try { localStorage.setItem('fl-lang', S.lang); } catch { /* ignore */ }
   render();
 }
-const langSwitch = () => `<div class="lang-switch" role="group" aria-label="Language">
+const langSwitch = () => `<div class="lang-switch" role="group" aria-label="${t('langLabel')}">
   ${[['fr', 'FR'], ['he', 'עב'], ['en', 'EN']].map(([k, v]) => `<button type="button" data-act="lang" data-lang="${k}" aria-pressed="${S.lang === k}" lang="${k}">${v}</button>`).join('')}
 </div>`;
 
@@ -122,7 +122,7 @@ function topbar() {
 
 function tabbar(active) {
   const item = (key, ic, txt, href) => `<a class="tab" href="${href}" ${active === key ? 'aria-current="page"' : ''}>${icon(ic)}<span>${txt}</span></a>`;
-  return `<div class="tabbar"><nav aria-label="Navigation">
+  return `<div class="tabbar"><nav aria-label="${t('navLabel')}">
     ${item('home', 'home', t('tabHome'), '#/home')}
     ${item('requests', 'inbox', t('tabRequests'), '#/requests')}
     <a class="tab fab" href="#/new" ${active === 'new' ? 'aria-current="page"' : ''}><span class="ic-wrap">${icon('plus')}</span><span>${t('tabReport')}</span></a>
@@ -738,6 +738,7 @@ async function boot() {
   S.lang = detectLang();
   document.documentElement.lang = S.lang;
   document.documentElement.dir = S.lang === 'he' ? 'rtl' : 'ltr';
+  document.title = '4FLORENTINE · ' + t('pageTitle');
   try { api = createApi('fl-resident-auth'); }
   catch { $('#app').innerHTML = `<div class="page"><div class="banner banner-error" style="margin-top:40px">${icon('alert', 'ic-sm')}${t('err_network')}</div></div>`; return; }
   loadShabbat();
