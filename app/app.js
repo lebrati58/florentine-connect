@@ -149,11 +149,11 @@ function viewLogin() {
         </div>
         <div class="field">
           <label for="floorInput">${t('floor')}</label>
-          <input class="input" id="floorInput" name="floor" type="number" inputmode="numeric" min="0" max="80" step="1" value="${esc(L1.floor)}">
+          <input class="input" id="floorInput" name="floor" type="number" inputmode="numeric" min="1" max="9" step="1" value="${esc(L1.floor)}">
         </div>
         <div class="field">
           <label for="aptInput">${t('aptNumber')}</label>
-          <input class="input" id="aptInput" name="apt" inputmode="numeric" autocomplete="username" maxlength="5" pattern="[0-9]{1,4}[A-Za-z]?" value="${esc(L1.number)}" required>
+          <input class="input" id="aptInput" name="apt" inputmode="numeric" autocomplete="username" maxlength="3" pattern="[1-6][1-9][1-5]" value="${esc(L1.number)}" required>
           <p class="fineprint">${t('aptAutofillHint')}</p>
         </div>
         <div class="field">
@@ -179,7 +179,7 @@ function afterLogin() {
   const suggest = () => {
     S.login.floor = f.floor.value;
     const floor = f.floor.value;
-    if (S.login.tower && /^(0|[1-9][0-9]?)$/.test(floor) && Number(floor) <= 80) {
+    if (S.login.tower && /^[1-9]$/.test(floor)) {
       const prefix = String(S.login.tower) + floor;
       const oldPrefix = f.apt.dataset.prefix;
       const suffix = oldPrefix && f.apt.value.startsWith(oldPrefix) ? f.apt.value.slice(oldPrefix.length) : '';
@@ -196,7 +196,7 @@ function afterLogin() {
     const number = f.apt.value.trim(), pin = f.pin.value.trim();
     sessionStorage.setItem('fl-login-apt', number);
     if (!S.login.tower) { S.login.error = t('chooseTower'); return render(); }
-    if (!/^[0-9]{1,4}[A-Za-z]?$/.test(number)) { S.login.error = t('aptNumber') + ' : ' + t('required'); return render(); }
+    if (!/^[1-6][1-9][1-5]$/.test(number) || Number(number) > 692 || number[0] !== String(S.login.tower) || (S.login.floor !== '' && number[1] !== S.login.floor)) { S.login.error = t('aptNumber') + ' : ' + t('required'); return render(); }
     if (!/^[0-9]{6}$/.test(pin)) { S.login.error = t('pinFormat'); return render(); }
     S.login.busy = true; S.login.error = ''; render();
     try {
