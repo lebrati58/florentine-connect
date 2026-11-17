@@ -13,7 +13,7 @@ assert.equal(form.apt.value, '49');
 form.apt.value = '491'; form.apt.handlers.input();
 assert.equal(state.login.number, '491');
 form.floor.value = '10'; form.floor.handlers.input();
-assert.equal(form.apt.value, '4101');
+assert.equal(form.apt.value, '491'); // Invalid floor 10 must not generate a four-digit number.
 form.apt.value = 'custom'; form.apt.handlers.input();
 assert.equal(state.login.number, 'custom');
 for (let tower = 1; tower <= 6; tower++) {
@@ -22,4 +22,8 @@ for (let tower = 1; tower <= 6; tower++) {
   assert.equal(form.apt.value, String(tower) + '9');
 }
 assert.ok(source.includes('[1, 2, 3, 4, 5, 6].map'));
-console.log('Apartment prefill: six buildings, 491, multi-digit floor, manual correction passed.');
+console.log('Apartment prefill: six buildings, 491, floor 10 rejected, manual correction passed.');
+
+assert.ok(source.includes('Number(number) > 692'));
+assert.ok(source.includes('maxlength="3"'));
+assert.ok(source.includes('min="1" max="9"'));
