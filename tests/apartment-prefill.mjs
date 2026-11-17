@@ -2,28 +2,22 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import assert from 'node:assert/strict';
 const source = readFileSync(new URL('../app/app.js', import.meta.url), 'utf8');
-const start = source.indexOf('function afterLogin()');
-const end = source.indexOf('async function onSignedIn()', start);
-function input(value = '') { return { value, dataset: {}, handlers: {}, addEventListener(k, cb) { this.handlers[k] = cb; } }; }
-const form = { apt: input(), floor: input(), handlers: {}, addEventListener(k, cb) { this.handlers[k] = cb; } };
-const state = { login: { tower: 4, floor: '', number: '' } };
-runInNewContext(source.slice(start, end) + '\nafterLogin();', { S: state, $: () => form, sessionStorage: { getItem: () => null } });
-form.floor.value = '9'; form.floor.handlers.input();
-assert.equal(form.apt.value, '49');
-form.apt.value = '491'; form.apt.handlers.input();
-assert.equal(state.login.number, '491');
-form.floor.value = '10'; form.floor.handlers.input();
-assert.equal(form.apt.value, '491'); // Invalid floor 10 must not generate a four-digit number.
-form.apt.value = 'custom'; form.apt.handlers.input();
-assert.equal(state.login.number, 'custom');
+const start = source.indexOf('function apartmentChoices(');
+const end = source.indexOf('function viewLogin()', start);
+const context = {};
+runInNewContext(source.slice(start, end) + '\nthis.choices = apartmentChoices;', context);
+const choices = (tower, floor) => Array.from(context.choices(tower, floor));
+assert.deepEqual(choices(2, 5), ['251','252','253','254','255','256']);
+assert.deepEqual(choices(4, 9), ['491','492']);
 for (let tower = 1; tower <= 6; tower++) {
-  state.login.tower = tower; form.apt.value = ''; form.apt.dataset = {};
-  form.floor.value = '9'; form.floor.handlers.input();
-  assert.equal(form.apt.value, String(tower) + '9');
+  for (let floor = 1; floor <= 9; floor++) {
+    const list = choices(tower, floor);
+    assert.equal(list.length, floor === 9 ? 2 : 6);
+    assert.equal(new Set(list).size, list.length);
+    for (const n of list) { assert.equal(n.slice(0,2), String(tower) + floor); assert.ok(Number(n) >= 111 && Number(n) <= 692); }
+  }
 }
-assert.ok(source.includes('[1, 2, 3, 4, 5, 6].map'));
-console.log('Apartment prefill: six buildings, 491, floor 10 rejected, manual correction passed.');
-
-assert.ok(source.includes('Number(number) > 692'));
-assert.ok(source.includes('maxlength="3"'));
-assert.ok(source.includes('min="1" max="9"'));
+for (const [t, f] of [[0,1],[7,1],[1,0],[1,10],[1,''],[null,9]]) assert.deepEqual(choices(t,f), []);
+assert.ok(source.includes('<select class="input" id="aptInput"'));
+assert.ok(source.includes('!apartmentChoices(S.login.tower, S.login.floor).includes(number)'));
+console.log('54 building/floor combinations, six/two options, invalid inputs and select validation passed.');
