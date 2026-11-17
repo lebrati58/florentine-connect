@@ -132,6 +132,11 @@ function tabbar(active) {
 }
 
 /* ---------- connexion ---------- */
+function apartmentChoices(tower, floor) {
+  if (!/^[1-6]$/.test(String(tower)) || !/^[1-9]$/.test(String(floor))) return [];
+  return Array.from({ length: Number(floor) === 9 ? 2 : 6 }, (_, i) => String(tower) + String(floor) + (i + 1));
+}
+
 function viewLogin() {
   const L1 = S.login;
   return `<div class="login">
@@ -153,7 +158,10 @@ function viewLogin() {
         </div>
         <div class="field">
           <label for="aptInput">${t('aptNumber')}</label>
-          <input class="input" id="aptInput" name="apt" inputmode="numeric" autocomplete="username" maxlength="3" pattern="[1-6][1-9][1-5]" value="${esc(L1.number)}" required>
+          <select class="input" id="aptInput" name="apt" required ${apartmentChoices(L1.tower, L1.floor).length ? '' : 'disabled'}>
+            <option value="">${t('aptNumber')}</option>
+            ${apartmentChoices(L1.tower, L1.floor).map(n => `<option value="${n}" ${L1.number === n ? 'selected' : ''}>${n}</option>`).join('')}
+          </select>
           <p class="fineprint">${t('aptAutofillHint')}</p>
         </div>
         <div class="field">
@@ -175,28 +183,23 @@ function viewLogin() {
 }
 function afterLogin() {
   const f = $('#loginForm'); if (!f) return;
-  const apt = S.login.number || sessionStorage.getItem('fl-login-apt'); if (apt) f.apt.value = apt;
   const suggest = () => {
     S.login.floor = f.floor.value;
-    const floor = f.floor.value;
-    if (S.login.tower && /^[1-9]$/.test(floor)) {
-      const prefix = String(S.login.tower) + floor;
-      const oldPrefix = f.apt.dataset.prefix;
-      const suffix = oldPrefix && f.apt.value.startsWith(oldPrefix) ? f.apt.value.slice(oldPrefix.length) : '';
-      f.apt.value = prefix + suffix;
-      f.apt.dataset.prefix = prefix;
-      S.login.number = f.apt.value;
-    }
+    const choices = apartmentChoices(S.login.tower, S.login.floor);
+    const previous = S.login.number;
+    f.apt.innerHTML = '<option value="">' + t('aptNumber') + '</option>' + choices.map(n => '<option value="' + n + '">' + n + '</option>').join('');
+    f.apt.disabled = !choices.length;
+    f.apt.value = choices.includes(previous) ? previous : '';
+    S.login.number = f.apt.value;
   };
-  if (S.login.tower && S.login.floor !== '') f.apt.dataset.prefix = String(S.login.tower) + S.login.floor;
   f.floor.addEventListener('input', suggest);
-  f.apt.addEventListener('input', () => { S.login.number = f.apt.value; });
+  f.apt.addEventListener('change', () => { S.login.number = f.apt.value; });
   f.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const number = f.apt.value.trim(), pin = f.pin.value.trim();
     sessionStorage.setItem('fl-login-apt', number);
     if (!S.login.tower) { S.login.error = t('chooseTower'); return render(); }
-    if (!/^[1-6][1-9][1-5]$/.test(number) || Number(number) > 692 || number[0] !== String(S.login.tower) || (S.login.floor !== '' && number[1] !== S.login.floor)) { S.login.error = t('aptNumber') + ' : ' + t('required'); return render(); }
+    if (!apartmentChoices(S.login.tower, S.login.floor).includes(number)) { S.login.error = t('aptNumber') + ' : ' + t('required'); return render(); }
     if (!/^[0-9]{6}$/.test(pin)) { S.login.error = t('pinFormat'); return render(); }
     S.login.busy = true; S.login.error = ''; render();
     try {
@@ -689,7 +692,7 @@ function reportSheet(id) {
 const actions = {
   lang: (el) => { setLang(el.dataset.lang); if ($('.overlay')) accountSheet(); },
   'cycle-lang': () => setLang({ fr: 'he', he: 'en', en: 'fr' }[S.lang]),
-  'pick-tower': (el) => { S.login.tower = Number(el.dataset.tower); if (S.login.floor !== '') S.login.number = String(S.login.tower) + S.login.floor; S.login.error = ''; render(); $('#floorInput')?.focus(); },
+  'pick-tower': (el) => { S.login.tower = Number(el.dataset.tower); S.login.number = ''; S.login.error = ''; render(); $('#floorInput')?.focus(); },
   'reveal-pin': (el) => { const i = $('#pinInput'); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; el.innerHTML = icon(show ? 'eye-off' : 'eye'); el.setAttribute('aria-label', show ? t('hidePin') : t('showPin')); },
   goto: (el) => { closeSheet(); go(el.dataset.href); },
   account: () => accountSheet(),
