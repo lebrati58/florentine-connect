@@ -13,7 +13,7 @@ const S = {
   directory: null, dirError: null, dirTrade: '', dirQuery: '',
   reqTab: 'open', detail: null, detailError: null, photoUrls: {},
   shabbat: null, shabbatError: false, online: navigator.onLine,
-  login: { tower: null, error: '', busy: false },
+  login: { tower: null, floor: '', number: '', error: '', busy: false },
   draft: null, sent: null, installEvt: null, unsub: null,
 };
 let api;
@@ -144,12 +144,17 @@ function viewLogin() {
         <div class="field">
           <span class="label" id="towerLbl">${t('chooseTower')}</span>
           <div class="tower-pick" role="group" aria-labelledby="towerLbl">
-            ${[1, 2, 3, 4].map(n => `<button type="button" data-act="pick-tower" data-tower="${n}" aria-pressed="${L1.tower === n}">${icon('towers')}<span>${t('towerN', { n })}</span></button>`).join('')}
+            ${[1, 2, 3, 4, 5, 6].map(n => `<button type="button" data-act="pick-tower" data-tower="${n}" aria-pressed="${L1.tower === n}">${icon('towers')}<span>${t('towerN', { n })}</span></button>`).join('')}
           </div>
         </div>
         <div class="field">
+          <label for="floorInput">${t('floor')}</label>
+          <input class="input" id="floorInput" name="floor" type="number" inputmode="numeric" min="1" max="9" step="1" value="${esc(L1.floor)}">
+        </div>
+        <div class="field">
           <label for="aptInput">${t('aptNumber')}</label>
-          <input class="input" id="aptInput" name="apt" inputmode="numeric" autocomplete="username" maxlength="5" pattern="[0-9]{1,4}[A-Za-z]?" required>
+          <input class="input" id="aptInput" name="apt" inputmode="numeric" autocomplete="username" maxlength="3" pattern="[1-6][1-9][1-5]" value="${esc(L1.number)}" required>
+          <p class="fineprint">${t('aptAutofillHint')}</p>
         </div>
         <div class="field">
           <label for="pinInput">${t('pin')}</label>
@@ -170,13 +175,28 @@ function viewLogin() {
 }
 function afterLogin() {
   const f = $('#loginForm'); if (!f) return;
-  const apt = sessionStorage.getItem('fl-login-apt'); if (apt) f.apt.value = apt;
+  const apt = S.login.number || sessionStorage.getItem('fl-login-apt'); if (apt) f.apt.value = apt;
+  const suggest = () => {
+    S.login.floor = f.floor.value;
+    const floor = f.floor.value;
+    if (S.login.tower && /^[1-9]$/.test(floor)) {
+      const prefix = String(S.login.tower) + floor;
+      const oldPrefix = f.apt.dataset.prefix;
+      const suffix = oldPrefix && f.apt.value.startsWith(oldPrefix) ? f.apt.value.slice(oldPrefix.length) : '';
+      f.apt.value = prefix + suffix;
+      f.apt.dataset.prefix = prefix;
+      S.login.number = f.apt.value;
+    }
+  };
+  if (S.login.tower && S.login.floor !== '') f.apt.dataset.prefix = String(S.login.tower) + S.login.floor;
+  f.floor.addEventListener('input', suggest);
+  f.apt.addEventListener('input', () => { S.login.number = f.apt.value; });
   f.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const number = f.apt.value.trim(), pin = f.pin.value.trim();
     sessionStorage.setItem('fl-login-apt', number);
     if (!S.login.tower) { S.login.error = t('chooseTower'); return render(); }
-    if (!/^[0-9]{1,4}[A-Za-z]?$/.test(number)) { S.login.error = t('aptNumber') + ' : ' + t('required'); return render(); }
+    if (!/^[1-6][1-9][1-5]$/.test(number) || Number(number) > 692 || number[0] !== String(S.login.tower) || (S.login.floor !== '' && number[1] !== S.login.floor)) { S.login.error = t('aptNumber') + ' : ' + t('required'); return render(); }
     if (!/^[0-9]{6}$/.test(pin)) { S.login.error = t('pinFormat'); return render(); }
     S.login.busy = true; S.login.error = ''; render();
     try {
@@ -669,7 +689,7 @@ function reportSheet(id) {
 const actions = {
   lang: (el) => { setLang(el.dataset.lang); if ($('.overlay')) accountSheet(); },
   'cycle-lang': () => setLang({ fr: 'he', he: 'en', en: 'fr' }[S.lang]),
-  'pick-tower': (el) => { const f = $('#loginForm'); const apt = f?.apt.value; S.login.tower = Number(el.dataset.tower); S.login.error = ''; render(); if (apt) $('#loginForm').apt.value = apt; $('#aptInput')?.focus(); },
+  'pick-tower': (el) => { S.login.tower = Number(el.dataset.tower); if (S.login.floor !== '') S.login.number = String(S.login.tower) + S.login.floor; S.login.error = ''; render(); $('#floorInput')?.focus(); },
   'reveal-pin': (el) => { const i = $('#pinInput'); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; el.innerHTML = icon(show ? 'eye-off' : 'eye'); el.setAttribute('aria-label', show ? t('hidePin') : t('showPin')); },
   goto: (el) => { closeSheet(); go(el.dataset.href); },
   account: () => accountSheet(),
