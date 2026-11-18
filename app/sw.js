@@ -1,9 +1,9 @@
 // 4FLORENTINE — service worker
 // Réseau d'abord pour tout le code de l'application : une nouvelle version publiée
 // est visible dès l'ouverture suivante ; le cache ne sert qu'en cas de coupure réseau.
-const CACHE = 'fl-app-2.0.2';
+const CACHE = 'fl-app-2.0.3';
 const SHELL = [
-  './', './index.html', './app.css?v=2.0.2', './app.js?v=2.0.2', './i18n.js', './manifest.webmanifest',
+  './', './index.html', './app.css?v=2.0.3', './app.js?v=2.0.3', './i18n.js', './manifest.webmanifest',
   '../assets/ds/tokens.css?v=2.0.1', '../assets/ds/components.css?v=2.0.1', '../assets/ds/icons.js',
   '../assets/js/core.js', '../assets/js/config.js', '../assets/vendor/supabase-2.119.0.js',
   '../assets/fonts/fonts.css', '../assets/brand/emblem.webp', '../assets/brand/logo-512.webp', '../assets/brand/icon-192.png',

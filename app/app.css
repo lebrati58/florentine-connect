@@ -206,3 +206,5 @@ h1, h2, h3 { margin: 0; }
 .tower-card h2 { font-family: var(--font-display); font-weight: 500; font-size: var(--fs-2xl); color: var(--gold-300); }
 .tower-card p { margin: 0; color: #B9C6D8; font-size: var(--fs-sm); }
 .tower-card img { grid-row: span 2; width: 96px; border-radius: 10px; }
+.gt-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--gold-700); text-decoration: none; }
+.gt-btn:hover { text-decoration: underline; }

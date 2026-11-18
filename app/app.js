@@ -316,11 +316,17 @@ function annText(a) {
   const tr = a.translations?.[S.lang];
   return { title: tr?.title || a.title, body: tr?.body || a.body };
 }
+// Français uniquement : bouton « Traduire avec Google » sous un texte écrit en hébreu.
+function gtBtn(text) {
+  if (S.lang !== 'fr' || !text || !/[\u0590-\u05FF]/.test(text)) return '';
+  const url = 'https://translate.google.com/?sl=auto&tl=fr&op=translate&text=' + encodeURIComponent(text);
+  return `<a class="gt-btn" href="${esc(url)}" target="_blank" rel="noopener">${icon('globe', 'ic-sm')}Traduire avec Google</a>`;
+}
 function noticeCard(a) {
   const { title, body } = annText(a);
   return `<article class="notice ${a.pinned ? 'pinned' : ''} ${a.category === 'urgent' ? 'urgent' : ''}">
     <div class="n-meta">${a.pinned ? icon('pin', 'ic-sm') : icon('megaphone', 'ic-sm')}<span>${esc(fmtDate(a.starts_at, S.lang, { day: 'numeric', month: 'long' }))}</span>${a.tower_id ? `<span>${t('towerN', { n: a.tower_id })}</span>` : ''}</div>
-    <h3>${esc(title)}</h3><p>${esc(body)}</p>
+    <h3>${esc(title)}</h3><p>${esc(body)}</p>${gtBtn(title + '\n\n' + body)}
   </article>`;
 }
 
@@ -371,7 +377,7 @@ function viewDetail() {
       <div><dt>${t('location')}</dt><dd>${x.location === 'common' ? t('commonArea') : t('inMyApt')}</dd></div>
       <div><dt>${t('tower')}</dt><dd>${t('towerN', { n: x.tower_id })}${x.floor != null ? ' / ' + t('floorN', { n: x.floor }) : ''}</dd></div>
       ${x.location_detail ? `<div class="wide"><dt>${t('locationDetail')}</dt><dd>${esc(x.location_detail)}</dd></div>` : ''}
-      ${x.description ? `<div class="wide"><dt>${t('details')}</dt><dd class="text">${esc(x.description)}</dd></div>` : ''}
+      ${x.description ? `<div class="wide"><dt>${t('details')}</dt><dd class="text">${esc(x.description)}</dd>${gtBtn(x.title + '\n\n' + x.description)}</div>` : ''}
     </dl>
     <div style="margin-top:16px"><div class="label" style="font-size:var(--fs-xs);color:var(--ink-3);margin-bottom:8px">${t('photos')}</div>
       <div class="thumbs">${photos.map(p => S.photoUrls[p.path] ? `<a class="thumb" href="${esc(S.photoUrls[p.path])}" target="_blank" rel="noopener"><img src="${esc(S.photoUrls[p.path])}" alt="" loading="lazy"></a>` : `<span class="thumb skel"></span>`).join('')}
@@ -398,7 +404,7 @@ function evRow(e) {
   else return '';
   return `<li><span class="dot ${e.actor_kind === 'staff' ? '' : 'night'}"></span>
     <div class="t-title">${title}</div><div class="t-meta">${esc(fmtDateTime(e.created_at, S.lang))}</div>
-    ${e.kind === 'comment' && e.body ? `<div class="t-body">${esc(e.body)}</div>` : ''}</li>`;
+    ${e.kind === 'comment' && e.body ? `<div class="t-body">${esc(e.body)}</div>${gtBtn(e.body)}` : ''}</li>`;
 }
 
 /* ---------- nouvelle demande ---------- */
@@ -610,7 +616,7 @@ async function entrySheet(id) {
       <div class="wide"><dt>${t('phone')}</dt><dd>${e.phone ? `<a href="tel:${esc(e.phone.replace(/[^0-9+]/g, ''))}">${esc(e.phone)}</a>` : `<span style="color:var(--ink-3);font-weight:400">${t('noPhone')}</span>`}</dd></div>
       ${e.area ? `<div><dt>${t('area')}</dt><dd>${esc(e.area)}</dd></div>` : ''}
       ${e.website ? `<div><dt>${t('website')}</dt><dd><a href="${esc(/^https?:/i.test(e.website) ? e.website : 'https://' + e.website)}" target="_blank" rel="noopener nofollow">${esc(e.website)}</a></dd></div>` : ''}
-      ${e.notes ? `<div class="wide"><dt>${t('notes')}</dt><dd class="text">${esc(e.notes)}</dd></div>` : ''}
+      ${e.notes ? `<div class="wide"><dt>${t('notes')}</dt><dd class="text">${esc(e.notes)}</dd>${gtBtn(e.notes)}</div>` : ''}
     </dl>
     <div class="btn-row" style="margin-top:14px">
       ${e.phone ? `<a class="btn btn-gold" href="tel:${esc(e.phone.replace(/[^0-9+]/g, ''))}">${icon('phone', 'ic-sm')}${t('call')}</a>` : ''}
