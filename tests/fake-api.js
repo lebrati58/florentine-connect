@@ -14,7 +14,7 @@
         'apt-2-30': { id: 'u-b', pin: '730155', kind: 'apartment' },
         'danny@test.local': { id: 'u-staff', pin: 'manager-pass', kind: 'staff' },
       },
-      towers: [1, 2, 3, 4].map(id => ({ id, name: 'Tour ' + id, name_he: 'בניין ' + id, floors: null, address: null, notes: null })),
+      towers: [1, 2, 3, 4, 5, 6].map(id => ({ id, name: 'Tour ' + id, name_he: 'בניין ' + id, floors: null, address: null, notes: null })),
       staff: [{ user_id: 'u-staff', full_name: 'Danny', role: 'owner', active: true, created_at: now() }],
       apartments: [
         { id: 1, tower_id: 1, number: '12', floor: 3, label: null, user_id: 'u-a', active: true, pin_set_at: now() },

@@ -88,7 +88,7 @@ function viewAuth() {
   return `<div class="auth">
     <section class="auth-art">
       <img src="../assets/brand/logo-512.webp" alt="4FLORENTINE" width="360" height="360">
-      <div><h2>ניהול ארבעת הבניינים במקום אחד.</h2><p>פניות דיירים, תחזוקה, ספקים, הודעות וספר בעלי המקצוע — מחוברים בזמן אמת לאפליקציית הדיירים.</p></div>
+      <div><h2>ניהול ששת הבניינים במקום אחד.</h2><p>פניות דיירים, תחזוקה, ספקים, הודעות וספר בעלי המקצוע — מחוברים בזמן אמת לאפליקציית הדיירים.</p></div>
     </section>
     <section class="auth-form"><div class="auth-card">
       ${needClaim ? (C.bootstrap ? `
@@ -208,7 +208,7 @@ function pageDashboard() {
   const avgTxt = avgH == null ? '—' : avgH < 48 ? `${Math.round(avgH)} ש׳` : `${(avgH / 24).toFixed(1)} ימים`;
   const kpi = (lbl, val, sub, ic, hot, go) => `<${go ? `button type="button" data-act="kpi" data-go='${go}'` : 'div'} class="kpi ${hot ? 'hot' : ''}"><span class="k-label">${icon(ic)}${lbl}</span><span class="k-val">${val}</span><span class="k-sub">${sub}</span></${go ? 'button' : 'div'}>`;
   return `${errBanner('tickets')}
-  <div class="page-title"><div><h1>לוח בקרה</h1><p>תמונת מצב חיה של ארבעת הבניינים.</p></div>
+  <div class="page-title"><div><h1>לוח בקרה</h1><p>תמונת מצב חיה של ששת הבניינים.</p></div>
     <button class="btn btn-line btn-sm" data-act="reload">${icon('refresh', 'ic-sm')}רענון</button></div>
   <div class="kpis">
     ${kpi('פניות פתוחות', open.length, `${T.length} בסה״כ`, 'inbox', false, '{"status":"open"}')}
@@ -227,7 +227,7 @@ function pageDashboard() {
     </div>
     <div class="stack">
       <section class="card"><div class="card-h"><h2>${icon('filter')}לפי סטטוס</h2></div><div class="card-b">${hbars(STATUSES.filter(s => s.key !== 'cancelled').map(s => [he(STATUSES, s.key), T.filter(t => t.status === s.key).length, `var(--st-${s.key === 'in_progress' ? 'progress' : s.key})`]))}</div></section>
-      <section class="card"><div class="card-h"><h2>${icon('towers')}פניות פתוחות לפי בניין</h2></div><div class="card-b">${hbars([1, 2, 3, 4].map(n => [`בניין ${n}`, open.filter(t => t.tower_id === n).length, 'var(--night-700)']))}</div></section>
+      <section class="card"><div class="card-h"><h2>${icon('towers')}פניות פתוחות לפי בניין</h2></div><div class="card-b">${hbars([1, 2, 3, 4, 5, 6].map(n => [`בניין ${n}`, open.filter(t => t.tower_id === n).length, 'var(--night-700)']))}</div></section>
       <section class="card"><div class="card-h"><h2>${icon('wrench')}לפי קטגוריה</h2></div><div class="card-b">${T.length ? hbars(CATEGORIES.map(c => [c.he, T.filter(t => t.category === c.key).length, 'var(--gold-600)']).filter(x => x[1]).sort((a, b) => b[1] - a[1]).slice(0, 6)) : '<p class="muted" style="margin:0">אין נתונים.</p>'}</div></section>
     </div>
   </div>
@@ -298,7 +298,7 @@ function pageTickets() {
     <div class="toolbar">
       <div class="search-in">${icon('search')}<input class="input" id="tq" type="search" placeholder="מספר פנייה, כותרת, דירה…" value="${esc(C.f.q)}" aria-label="חיפוש פניות"></div>
       <select class="select" data-f="priority" aria-label="דחיפות"><option value="">כל הדחיפויות</option>${PRIORITIES.map(p => `<option value="${p.key}" ${C.f.priority === p.key ? 'selected' : ''}>${p.he}</option>`).join('')}</select>
-      <select class="select" data-f="tower" aria-label="בניין"><option value="">כל הבניינים</option>${[1, 2, 3, 4].map(n => `<option value="${n}" ${String(C.f.tower) === String(n) ? 'selected' : ''}>בניין ${n}</option>`).join('')}</select>
+      <select class="select" data-f="tower" aria-label="בניין"><option value="">כל הבניינים</option>${[1, 2, 3, 4, 5, 6].map(n => `<option value="${n}" ${String(C.f.tower) === String(n) ? 'selected' : ''}>בניין ${n}</option>`).join('')}</select>
       <select class="select" data-f="category" aria-label="קטגוריה"><option value="">כל הקטגוריות</option>${CATEGORIES.map(c => `<option value="${c.key}" ${C.f.category === c.key ? 'selected' : ''}>${c.he}</option>`).join('')}</select>
       <select class="select" data-f="assignee" aria-label="אחראי"><option value="">כל האחראים</option><option value="none" ${C.f.assignee === 'none' ? 'selected' : ''}>לא שובץ</option>${C.data.staff.map(s => `<option value="${s.user_id}" ${C.f.assignee === s.user_id ? 'selected' : ''}>${esc(s.full_name)}</option>`).join('')}</select>
       <span class="spacer"></span><span class="muted">${list.length} תוצאות</span>
@@ -443,22 +443,22 @@ function pageBuildings() {
   const q = C.aptQ.trim().toLowerCase();
   const list = A.filter(a => (!C.aptTower || a.tower_id === Number(C.aptTower)) && (!q || String(a.number).includes(q) || (a.label || '').toLowerCase().includes(q)));
   return `${errBanner('apartments')}
-  <div class="page-title"><div><h1>בניינים ודירות</h1><p>ניהול ארבעת הבניינים, הדירות וקודי הכניסה של הדיירים.</p></div>${can.manage() ? `<button class="btn btn-gold" data-act="apt-bulk">${icon('plus', 'ic-sm')}הוספת דירות</button>` : ''}</div>
-  <div class="towers">${[1, 2, 3, 4].map(n => { const tw = C.data.towers.find(x => x.id === n) || {}; const ta = A.filter(a => a.tower_id === n); return `<article class="tower">
+  <div class="page-title"><div><h1>בניינים ודירות</h1><p>ניהול ששת הבניינים, הדירות וקודי הכניסה של הדיירים.</p></div>${can.manage() ? `<button class="btn btn-gold" data-act="apt-bulk">${icon('plus', 'ic-sm')}הוספת דירות</button>` : ''}</div>
+  <div class="towers">${[1, 2, 3, 4, 5, 6].map(n => { const tw = C.data.towers.find(x => x.id === n) || {}; const ta = A.filter(a => a.tower_id === n); return `<article class="tower">
     <h3>בניין ${n}</h3><span style="color:#9FB0C7;font-size:12.5px">${tw.floors ? `${tw.floors} קומות` : 'מספר קומות לא הוגדר'}${tw.address ? ' · ' + esc(tw.address) : ''}</span>
     <div class="stats"><div><b>${ta.length}</b><small>דירות</small></div><div><b>${ta.filter(a => a.pin_set_at).length}</b><small>מחוברות</small></div><div><b>${T.filter(t => t.tower_id === n && OPEN_STATUSES.includes(t.status)).length}</b><small>פניות פתוחות</small></div></div>
     ${can.manage() ? `<button class="btn btn-line btn-sm" data-act="tower-form" data-id="${n}">${icon('edit', 'ic-sm')}פרטי הבניין</button>` : ''}
   </article>`; }).join('')}</div>
   <section class="card">
     <div class="toolbar"><div class="search-in">${icon('search')}<input class="input" id="aq" type="search" placeholder="מספר דירה או שם משפחה" value="${esc(C.aptQ)}" aria-label="חיפוש דירה"></div>
-      <select class="select" id="aTower" aria-label="בניין"><option value="">כל הבניינים</option>${[1, 2, 3, 4].map(n => `<option value="${n}" ${String(C.aptTower) === String(n) ? 'selected' : ''}>בניין ${n}</option>`).join('')}</select>
+      <select class="select" id="aTower" aria-label="בניין"><option value="">כל הבניינים</option>${[1, 2, 3, 4, 5, 6].map(n => `<option value="${n}" ${String(C.aptTower) === String(n) ? 'selected' : ''}>בניין ${n}</option>`).join('')}</select>
       <span class="spacer"></span><span class="muted">${list.length} דירות</span></div>
     ${list.length ? `<div class="tbl-wrap"><table class="tbl responsive"><thead><tr><th>דירה</th><th data-hide-m>קומה</th><th data-hide-m>משפחה / הערה</th><th>גישה לאפליקציה</th><th data-hide-m>פניות</th><th></th></tr></thead><tbody>
       ${list.map(a => `<tr><td><div class="ttl">בניין ${a.tower_id} · דירה ${esc(a.number)}</div></td><td data-hide-m>${a.floor ?? '—'}</td><td data-hide-m>${esc(a.label || '—')}</td>
         <td>${!a.active ? '<span class="badge st-cancelled">מושבתת</span>' : a.pin_set_at ? `<span class="badge st-resolved">פעילה</span><div class="sub">קוד הונפק ${esc(relTime(a.pin_set_at, 'he'))}</div>` : '<span class="badge st-waiting">ללא קוד</span>'}</td>
         <td data-hide-m>${T.filter(t => t.apartment_id === a.id).length}</td>
         <td style="white-space:nowrap">${can.manage() ? `<button class="btn btn-night btn-sm" data-act="set-pin" data-id="${a.id}">${icon('key', 'ic-sm')}${a.pin_set_at ? 'קוד חדש' : 'הנפקת קוד'}</button> <button class="btn btn-ghost btn-sm" data-act="apt-form" data-id="${a.id}" aria-label="עריכה">${icon('edit', 'ic-sm')}</button>${a.pin_set_at ? ` <button class="btn btn-ghost btn-sm" data-act="apt-disable" data-id="${a.id}" title="ניתוק הגישה">${icon('lock', 'ic-sm')}</button>` : ''}` : ''}</td></tr>`).join('')}
-    </tbody></table></div>` : `<div class="card-b">${empty('home', A.length ? 'לא נמצאו דירות' : 'טרם הוגדרו דירות', A.length ? 'שנו את החיפוש.' : 'הוסיפו את 260 הדירות של ארבעת הבניינים (אפשר בטווחים), ולאחר מכן הנפיקו קוד לכל דירה.', can.manage() && !A.length ? `<button class="btn btn-night" data-act="apt-bulk">${icon('plus', 'ic-sm')}הוספת דירות</button>` : '')}</div>`}
+    </tbody></table></div>` : `<div class="card-b">${empty('home', A.length ? 'לא נמצאו דירות' : 'טרם הוגדרו דירות', A.length ? 'שנו את החיפוש.' : 'הוסיפו את כל הדירות של ששת הבניינים (אפשר בטווחים), ולאחר מכן הנפיקו קוד לכל דירה.', can.manage() && !A.length ? `<button class="btn btn-night" data-act="apt-bulk">${icon('plus', 'ic-sm')}הוספת דירות</button>` : '')}</div>`}
   </section>
   <p class="data-note">${icon('shield', 'ic-sm')}הקודים נוצרים בשרת, מוצגים פעם אחת בלבד ואינם נשמרים כטקסט גלוי. קוד חדש מנתק את כל החיבורים הקיימים של הדירה.</p>`;
 }
@@ -561,7 +561,7 @@ const formErr = (ov, m) => { const p = $('.form-error', ov); if (p) p.textConten
 function newTicketSheet() {
   sheet('פנייה חדשה (ע״י הצוות)', `<form id="ntForm">
     <div class="props" style="margin-bottom:14px">
-      <div class="field"><label for="ntTower">בניין</label><select class="select" id="ntTower" name="tower">${[1, 2, 3, 4].map(n => `<option value="${n}">בניין ${n}</option>`).join('')}</select></div>
+      <div class="field"><label for="ntTower">בניין</label><select class="select" id="ntTower" name="tower">${[1, 2, 3, 4, 5, 6].map(n => `<option value="${n}">בניין ${n}</option>`).join('')}</select></div>
       <div class="field"><label for="ntLoc">מיקום</label><select class="select" id="ntLoc" name="location"><option value="common">שטח משותף</option><option value="apartment">בתוך דירה</option></select></div>
       <div class="field"><label for="ntApt">דירה (לא חובה)</label><select class="select" id="ntApt" name="apt"><option value="">—</option></select></div>
       <div class="field"><label for="ntFloor">קומה</label><input class="input" id="ntFloor" name="floor" inputmode="numeric"></div>
@@ -625,7 +625,7 @@ function interventionSheet() {
 function bulkAptSheet() {
   sheet('הוספת דירות', `<form id="baForm"><p class="muted" style="margin-top:0">הוסיפו טווח של מספרי דירות לבניין. דירות קיימות לא ישוכפלו.</p>
     <div class="props" style="margin-bottom:14px">
-      <div class="field"><label for="baT">בניין</label><select class="select" id="baT" name="tower">${[1, 2, 3, 4].map(n => `<option value="${n}">בניין ${n}</option>`).join('')}</select></div>
+      <div class="field"><label for="baT">בניין</label><select class="select" id="baT" name="tower">${[1, 2, 3, 4, 5, 6].map(n => `<option value="${n}">בניין ${n}</option>`).join('')}</select></div>
       <div class="field"><label for="baF">קומה (לא חובה)</label><input class="input" id="baF" name="floor" inputmode="numeric"></div>
       <div class="field"><label for="baA">ממספר</label><input class="input" id="baA" name="from" inputmode="numeric" required></div>
       <div class="field"><label for="baB">עד מספר</label><input class="input" id="baB" name="to" inputmode="numeric" required></div>
@@ -691,7 +691,7 @@ function annSheet(id) {
       <div class="field"><label for="anB${l}">${l === 'he' ? 'תוכן' : 'Texte / Text'}</label><textarea class="textarea" id="anB${l}" name="body_${l}" maxlength="5000" style="min-height:130px">${esc(l === 'he' ? a.body || '' : tr[l]?.body || '')}</textarea></div></div>`).join('')}
     <div class="props" style="margin-bottom:14px">
       <div class="field"><label for="anC">סוג</label><select class="select" id="anC" name="category">${Object.entries(ANN_CAT).map(([k, l]) => `<option value="${k}" ${a.category === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-      <div class="field"><label for="anTw">קהל יעד</label><select class="select" id="anTw" name="tower"><option value="">כל הבניינים</option>${[1, 2, 3, 4].map(n => `<option value="${n}" ${a.tower_id === n ? 'selected' : ''}>בניין ${n}</option>`).join('')}</select></div>
+      <div class="field"><label for="anTw">קהל יעד</label><select class="select" id="anTw" name="tower"><option value="">כל הבניינים</option>${[1, 2, 3, 4, 5, 6].map(n => `<option value="${n}" ${a.tower_id === n ? 'selected' : ''}>בניין ${n}</option>`).join('')}</select></div>
       <div class="field"><label for="anE">תאריך תפוגה</label><input class="input" type="date" id="anE" name="expires" value="${a.expires_at ? a.expires_at.slice(0, 10) : ''}"></div>
     </div>
     <label class="check" style="margin-bottom:8px"><input type="checkbox" name="pinned" ${a.pinned ? 'checked' : ''}><span>הצמדה לראש הרשימה</span></label>

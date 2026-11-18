@@ -414,7 +414,7 @@ function viewNew() {
           <button type="button" class="choice" data-act="loc" data-loc="common" aria-pressed="${d.location === 'common'}">${icon('building')}<span>${t('commonArea')}</span></button>
         </div>
         ${d.location === 'common' ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
-          <div class="field"><label for="fTower">${t('tower')}</label><select class="select" id="fTower" name="tower">${[1, 2, 3, 4].map(n => `<option value="${n}" ${Number(d.tower) === n ? 'selected' : ''}>${t('towerN', { n })}</option>`).join('')}</select></div>
+          <div class="field"><label for="fTower">${t('tower')}</label><select class="select" id="fTower" name="tower">${[1, 2, 3, 4, 5, 6].map(n => `<option value="${n}" ${Number(d.tower) === n ? 'selected' : ''}>${t('towerN', { n })}</option>`).join('')}</select></div>
           <div class="field"><label for="fFloor">${t('floor')}</label><input class="input" id="fFloor" name="floor" inputmode="numeric" value="${esc(d.floor)}" maxlength="3"></div>
         </div>
         <div class="field"><label for="fDetail">${t('locationDetail')}</label><input class="input" id="fDetail" name="detail" maxlength="120" value="${esc(d.detail)}" placeholder="${t('locationDetailPh')}"></div>` : ''}
