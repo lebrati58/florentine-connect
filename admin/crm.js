@@ -21,6 +21,12 @@ const errMsg = (e) => {
   if (/Function not found|404|FunctionsFetchError|Failed to send a request/i.test(m)) return 'פונקציית השרת admin-api אינה זמינה עדיין (טרם נפרסה).';
   return ERR[errorKey(e)] || ERR.unknown;
 };
+// Texte écrit en français (ou autre langue latine) : lien vers Google Traduction en hébreu.
+const gtHe = (text) => {
+  if (!text || (String(text).match(/[A-Za-zÀ-ÿ]/g) || []).length < 3) return '';
+  const url = 'https://translate.google.com/?sl=auto&tl=iw&op=translate&text=' + encodeURIComponent(text);
+  return `<a class="gt-btn" href="${esc(url)}" target="_blank" rel="noopener">${icon('globe', 'ic-sm')}תרגום לעברית</a>`;
+};
 const initials = (n) => (n || '?').trim().split(/\s+/).map(x => x[0]).slice(0, 2).join('');
 
 /* ------------------------------------------------------------------ état */
@@ -357,7 +363,7 @@ function renderDrawer() {
         <div><dt>טופלה</dt><dd>${t.resolved_at ? esc(fmtDateTime(t.resolved_at, 'he')) : '—'}</dd></div>
       </dl>
       ${t.location_detail ? `<div class="panel"><b>מיקום מדויק:</b> ${esc(t.location_detail)}</div>` : ''}
-      <section class="card"><div class="card-h"><h2>${icon('message')}תיאור</h2></div><div class="card-b" style="white-space:pre-wrap">${t.description ? esc(t.description) : '<span class="muted">לא נמסר תיאור.</span>'}</div></section>
+      <section class="card"><div class="card-h"><h2>${icon('message')}תיאור</h2></div><div class="card-b" style="white-space:pre-wrap">${t.description ? esc(t.description) : '<span class="muted">לא נמסר תיאור.</span>'}${gtHe(t.title + '\n\n' + (t.description || ''))}</div></section>
       <section class="card"><div class="card-h"><h2>${icon('image')}תמונות (${d.photos.length})</h2>${can.edit() ? `<label class="btn btn-line btn-sm">${icon('camera', 'ic-sm')}הוספה<input type="file" accept="image/*" hidden id="dPhoto"></label>` : ''}</div>
         <div class="card-b">${d.photos.length ? `<div class="thumbs">${d.photos.map(p => C.photoUrls[p.path] ? `<a class="thumb" href="${esc(C.photoUrls[p.path])}" target="_blank" rel="noopener" style="width:96px;height:96px"><img src="${esc(C.photoUrls[p.path])}" alt="" loading="lazy"></a>` : '<span class="thumb skel" style="width:96px;height:96px"></span>').join('')}</div>` : '<span class="muted">אין תמונות.</span>'}</div></section>
       <section class="card"><div class="card-h"><h2>${icon('truck')}התערבויות ספקים</h2>${can.edit() ? `<button class="btn btn-line btn-sm" data-act="new-iv">${icon('plus', 'ic-sm')}התערבות</button>` : ''}</div>
@@ -393,7 +399,7 @@ function eventRow(e) {
   }
   return `<li><span class="dot ${e.actor_kind === 'resident' ? 'night' : ''}"></span><div class="t-title">${txt}${e.is_public ? '' : ' <span class="badge no-dot st-waiting" style="height:20px">פנימי</span>'}</div>
     <div class="t-meta">${who} · ${esc(fmtDateTime(e.created_at, 'he'))}</div>
-    ${(e.kind === 'comment' || e.kind === 'note') && e.body ? `<div class="t-body ${e.kind === 'note' ? 'internal' : ''}">${esc(e.body)}</div>` : ''}</li>`;
+    ${(e.kind === 'comment' || e.kind === 'note') && e.body ? `<div class="t-body ${e.kind === 'note' ? 'internal' : ''}">${esc(e.body)}</div>${gtHe(e.body)}` : ''}</li>`;
 }
 function bindDrawer(dr) {
   $$('[data-upd]', dr).forEach(el => el.addEventListener('change', async () => {
@@ -511,7 +517,7 @@ async function dirEntrySheet(id) {
   $('.sheet-body', ov).innerHTML = `
     <dl class="kv" style="grid-template-columns:repeat(2,1fr)"><div><dt>תחום</dt><dd>${he(TRADES, e.trade)}</dd></div><div><dt>טלפון</dt><dd dir="ltr" style="text-align:end">${esc(e.phone || '—')}</dd></div>
       <div><dt>המלצות</dt><dd>${Number(e.reco_count) ? `${Number(e.avg_rating).toFixed(1)} ★ (${e.reco_count})` : '—'}</dd></div><div><dt>סטטוס</dt><dd>${{ active: 'פעיל', obsolete: 'לא עדכני', hidden: 'מוסתר' }[e.status]}</dd></div></dl>
-    ${e.notes ? `<p style="white-space:pre-wrap">${esc(e.notes)}</p>` : ''}
+    ${e.notes ? `<p style="white-space:pre-wrap">${esc(e.notes)}</p>${gtHe(e.notes)}` : ''}
     ${can.edit() ? `<div class="btn-row" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
       ${e.status !== 'hidden' ? `<button class="btn btn-danger btn-sm" data-act="dir-status" data-id="${e.id}" data-s="hidden">${icon('eye-off', 'ic-sm')}הסתרה</button>` : `<button class="btn btn-line btn-sm" data-act="dir-status" data-id="${e.id}" data-s="active">${icon('eye', 'ic-sm')}החזרה לפרסום</button>`}
       ${e.status === 'obsolete' ? `<button class="btn btn-line btn-sm" data-act="dir-status" data-id="${e.id}" data-s="active">${icon('check', 'ic-sm')}סימון כעדכני</button>` : e.status === 'active' ? `<button class="btn btn-line btn-sm" data-act="dir-status" data-id="${e.id}" data-s="obsolete">סימון כלא עדכני</button>` : ''}</div>` : ''}
