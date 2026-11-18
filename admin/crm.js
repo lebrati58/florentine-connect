@@ -443,7 +443,7 @@ function pageBuildings() {
   const q = C.aptQ.trim().toLowerCase();
   const list = A.filter(a => (!C.aptTower || a.tower_id === Number(C.aptTower)) && (!q || String(a.number).includes(q) || (a.label || '').toLowerCase().includes(q)));
   return `${errBanner('apartments')}
-  <div class="page-title"><div><h1>בניינים ודירות</h1><p>ניהול ששת הבניינים, הדירות וקודי הכניסה של הדיירים.</p></div>${can.manage() ? `<button class="btn btn-gold" data-act="apt-bulk">${icon('plus', 'ic-sm')}הוספת דירות</button>` : ''}</div>
+  <div class="page-title"><div><h1>בניינים ודירות</h1><p>ניהול ששת הבניינים, הדירות וקודי הכניסה של הדיירים.</p></div>${can.manage() ? `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-night" data-act="apply-door-codes">${icon('key', 'ic-sm')}החלת קודי כניסה לכל הדירות</button><button class="btn btn-gold" data-act="apt-bulk">${icon('plus', 'ic-sm')}הוספת דירות</button></div>` : ''}</div>
   <div class="towers">${[1, 2, 3, 4, 5, 6].map(n => { const tw = C.data.towers.find(x => x.id === n) || {}; const ta = A.filter(a => a.tower_id === n); return `<article class="tower">
     <h3>בניין ${n}</h3><span style="color:#9FB0C7;font-size:12.5px">${tw.floors ? `${tw.floors} קומות` : 'מספר קומות לא הוגדר'}${tw.address ? ' · ' + esc(tw.address) : ''}</span>
     <div class="stats"><div><b>${ta.length}</b><small>דירות</small></div><div><b>${ta.filter(a => a.pin_set_at).length}</b><small>מחוברות</small></div><div><b>${T.filter(t => t.tower_id === n && OPEN_STATUSES.includes(t.status)).length}</b><small>פניות פתוחות</small></div></div>
@@ -796,6 +796,15 @@ const actions = {
   'apt-form': (el) => aptSheet(Number(el.dataset.id)),
   'tower-form': (el) => towerSheet(Number(el.dataset.id)),
   'set-pin': (el) => setPin(Number(el.dataset.id)),
+  'apply-door-codes': async () => {
+    if (!confirm('להחיל על כל הדירות הפעילות את הקוד: קוד הכניסה לבניין + מספר הדירה? הקוד הקודם של כל דירה יוחלף.')) return;
+    toast('מחיל קודים… זה עשוי לקחת עד דקה.');
+    try {
+      const r = await api.adminCall('apartments_apply_door_codes', {});
+      C.data.apartments = await api.apartments(); render();
+      toast(`הקודים הוחלו על ${r.done} דירות${r.failed.length ? ` · נכשלו: ${r.failed.join(', ')}` : ''}`, r.failed.length ? 'error' : undefined);
+    } catch (x) { toast(/no_door_codes/.test(String(x?.message || x)) ? 'טרם הוגדרו קודי כניסה לבניינים.' : errMsg(x), 'error'); }
+  },
   'apt-disable': async (el) => {
     const a = aptOf(Number(el.dataset.id));
     if (!confirm(`לנתק את הגישה של בניין ${a.tower_id}, דירה ${a.number}? הדיירים יידרשו לקוד חדש.`)) return;

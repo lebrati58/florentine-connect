@@ -1,7 +1,9 @@
 // 4FLORENTINE · admin-api (Supabase Edge Function, Deno)
 // Opérations qui exigent la clé service_role, qui ne quitte jamais le serveur :
-//  - apartment_set_pin : crée le compte d'un appartement ou génère un nouveau PIN
-//                        (révoque alors toutes les sessions ouvertes)
+//  - apartment_set_pin : crée le compte d'un appartement ou remet son code
+//                        (code de porte du bâtiment + n° d'appartement, sinon PIN aléatoire ;
+//                        révoque alors toutes les sessions ouvertes)
+//  - apartments_apply_door_codes : fait la même chose pour tous les appartements actifs
 //  - apartment_disable : bloque l'accès d'un appartement
 //  - staff_create      : crée un compte équipe avec mot de passe temporaire (propriétaire uniquement)
 // L'appelant est authentifié par son JWT ; son rôle est relu dans public.staff.
@@ -38,6 +40,40 @@ function generatePin(): string {
     if (!WEAK.has(pin) && !/^(\d)\1{5}$/.test(pin)) return pin;
   }
 }
+// Code de porte par bâtiment, lu dans public.tower_door_codes (service_role uniquement).
+async function doorCodes(): Promise<Map<number, string>> {
+  const { data, error } = await admin.from("tower_door_codes").select("tower_id, door_code");
+  if (error) throw error;
+  return new Map((data ?? []).map((r) => [Number(r.tower_id), String(r.door_code)]));
+}
+function pinFor(apt: { tower_id: number; number: string }, codes: Map<number, string>): string {
+  const door = codes.get(Number(apt.tower_id));
+  return door ? door + String(apt.number).trim() : generatePin();
+}
+
+type Apt = { id: number; tower_id: number; number: string; user_id: string | null };
+// Crée le compte de l'appartement ou remplace son code (et révoque les sessions si demandé).
+async function setApartmentPin(apt: Apt, pin: string, revoke: boolean) {
+  let userId = apt.user_id;
+  if (userId) {
+    const { error } = await admin.auth.admin.updateUserById(userId, { password: pin, ban_duration: "none" });
+    if (error) throw error;
+    if (revoke) await admin.rpc("revoke_user_sessions", { p_user: userId });
+  } else {
+    const { data, error } = await admin.auth.admin.createUser({
+      email: apartmentEmail(apt.tower_id, apt.number),
+      password: pin,
+      email_confirm: true,
+      app_metadata: { kind: "apartment", apartment_id: apt.id },
+    });
+    if (error) throw error;
+    userId = data.user.id;
+  }
+  const { error: upErr } = await admin.from("apartments")
+    .update({ user_id: userId, pin_set_at: new Date().toISOString() }).eq("id", apt.id);
+  if (upErr) throw upErr;
+}
+
 function generatePassword(): string {
   const bytes = new Uint8Array(15);
   crypto.getRandomValues(bytes);
@@ -69,27 +105,30 @@ Deno.serve(async (req) => {
         const { data: apt } = await admin.from("apartments").select("id, tower_id, number, user_id, active").eq("id", id).maybeSingle();
         if (!apt) return reply(404, { error: "apartment_not_found" });
         if (!apt.active) return reply(409, { error: "apartment_inactive" });
-        const pin = generatePin();
-        let userId = apt.user_id as string | null;
-        if (userId) {
-          const { error } = await admin.auth.admin.updateUserById(userId, { password: pin, ban_duration: "none" });
-          if (error) throw error;
-          await admin.rpc("revoke_user_sessions", { p_user: userId });
-        } else {
-          const { data, error } = await admin.auth.admin.createUser({
-            email: apartmentEmail(apt.tower_id, apt.number),
-            password: pin,
-            email_confirm: true,
-            app_metadata: { kind: "apartment", apartment_id: apt.id },
-          });
-          if (error) throw error;
-          userId = data.user.id;
-        }
-        const { error: upErr } = await admin.from("apartments")
-          .update({ user_id: userId, pin_set_at: new Date().toISOString() }).eq("id", apt.id);
-        if (upErr) throw upErr;
-        // Le PIN n'est renvoyé qu'une seule fois et n'est stocké nulle part en clair.
+        const pin = pinFor(apt, await doorCodes());
+        await setApartmentPin(apt as Apt, pin, true);
+        // Le PIN n'est stocké nulle part en clair (haché par Supabase Auth).
         return reply(200, { pin, tower_id: apt.tower_id, number: apt.number });
+      }
+
+      case "apartments_apply_door_codes": {
+        if (!isManager) return reply(403, { error: "forbidden" });
+        const codes = await doorCodes();
+        if (!codes.size) return reply(409, { error: "no_door_codes" });
+        const { data: apts, error } = await admin.from("apartments")
+          .select("id, tower_id, number, user_id, pin_set_at").eq("active", true).order("tower_id").order("number");
+        if (error) throw error;
+        // On ne réactive pas un appartement dont l'accès a été coupé (compte existant sans code).
+        const todo = (apts ?? []).filter((a) => codes.has(Number(a.tower_id)) && !(a.user_id && !a.pin_set_at)) as Apt[];
+        let done = 0;
+        const failed: string[] = [];
+        for (let i = 0; i < todo.length; i += 8) {
+          await Promise.all(todo.slice(i, i + 8).map(async (a) => {
+            try { await setApartmentPin(a, pinFor(a, codes), false); done++; }
+            catch (e) { console.error(a.tower_id, a.number, e); failed.push(`${a.tower_id}-${a.number}`); }
+          }));
+        }
+        return reply(200, { done, failed, skipped: (apts ?? []).length - todo.length });
       }
 
       case "apartment_disable": {

@@ -167,7 +167,7 @@ function viewLogin() {
         <div class="field">
           <label for="pinInput">${t('pin')}</label>
           <div class="pin-wrap">
-            <input class="input" id="pinInput" name="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="6" pattern="[0-9]{6}" required>
+            <input class="input" id="pinInput" name="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="7" pattern="[0-9]{6,7}" required>
             <button class="reveal" type="button" data-act="reveal-pin" aria-label="${t('showPin')}">${icon('eye')}</button>
           </div>
         </div>
@@ -200,7 +200,7 @@ function afterLogin() {
     sessionStorage.setItem('fl-login-apt', number);
     if (!S.login.tower) { S.login.error = t('chooseTower'); return render(); }
     if (!apartmentChoices(S.login.tower, S.login.floor).includes(number)) { S.login.error = t('aptNumber') + ' : ' + t('required'); return render(); }
-    if (!/^[0-9]{6}$/.test(pin)) { S.login.error = t('pinFormat'); return render(); }
+    if (!/^[0-9]{6,7}$/.test(pin)) { S.login.error = t('loginPinFormat'); return render(); }
     S.login.busy = true; S.login.error = ''; render();
     try {
       await api.signInApartment(S.login.tower, number, pin);
