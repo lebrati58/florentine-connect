@@ -16,6 +16,7 @@ h1, h2, h3 { margin: 0; }
 .login .lead { text-align: center; color: #B9C6D8; margin: 6px 0 26px; }
 .login .field > label, .login .field > .label { color: #C7D2E1; }
 .login .input { background: rgba(255,255,255,.06); border-color: rgba(232,208,143,.28); color: var(--white); min-height: 54px; font-size: var(--fs-md); }
+.login select.input option { color: #0B1220; background: #FFFFFF; }
 .login .input::placeholder { color: #7F8EA5; }
 .tower-pick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .tower-pick button { display: grid; justify-items: center; gap: 6px; padding: 12px 4px 10px; border-radius: var(--r-md); border: 1px solid rgba(232,208,143,.22); background: rgba(255,255,255,.04); color: #D6DEEA; font-weight: 600; cursor: pointer; transition: background .15s, border-color .15s; }
